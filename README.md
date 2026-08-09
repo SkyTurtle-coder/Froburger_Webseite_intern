@@ -99,7 +99,9 @@ py -3.12 -m venv .venv
 pip install -r requirements.txt
 Copy-Item .env.example .env
 python manage.py migrate
-python manage.py bootstrap_internal --username admin --password "BitteErsetzen123!" --email "admin@example.org"
+python manage.py bootstrap_internal --username admin --email "admin@example.org"
+# prompts for the admin password (no echo) - or set AVF_BOOTSTRAP_ADMIN_PASSWORD
+# beforehand for a non-interactive/scripted run (SEC-014: never as a CLI flag)
 python manage.py runserver 127.0.0.1:8000
 ```
 

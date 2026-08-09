@@ -8,13 +8,14 @@ from unittest import skip
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test.utils import override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from PIL import Image
 
@@ -299,6 +300,9 @@ class PublicMembersPayloadTests(TestCase):
         cls.deceased_user.profile.save()
         cls.deceased_user.profile.roles.add(cls.bursch_role)
 
+    def setUp(self):
+        cache.clear()  # avoid SEC-013's per-IP rate limit tripping across tests in this class
+
     def test_public_media_base_url_requires_http_scheme(self):
         with override_settings(PUBLIC_MEDIA_BASE_URL="media.avfroburger.test/media/"):
             with self.assertRaises(ImproperlyConfigured):
@@ -342,6 +346,7 @@ class PublicMembersPayloadTests(TestCase):
         self.assertEqual(member["entry_display"], "2022 HS")
         self.assertEqual(member["academic_title"], "MSc")
         self.assertEqual(member["degree_program"], "Biotechnology")
+        self.assertNotIn("id", member)  # SEC-013: internal PK has no display purpose, never exposed
         self.assertNotIn("birth_date", member)
         self.assertNotIn("death_date", member)
         self.assertNotIn("exit_year", member)
@@ -384,6 +389,39 @@ class PublicMembersPayloadTests(TestCase):
         member = next(member for member in salon_members if member["display_name"] == "Nina Ohnebild")
         self.assertTrue(member["photo"]["fallback"])
         self.assertEqual(member["photo"]["variants"], {})
+
+
+class PublicMembersApiRateLimitTests(TestCase):
+    """SEC-013: moderate per-IP rate limit against direct scraping, without
+    blocking WordPress's own (much less frequent) legitimate sync calls."""
+
+    def setUp(self):
+        cache.clear()
+
+    def test_requests_within_limit_all_succeed(self):
+        from accounts.public_views import PUBLIC_MEMBERS_RATE_LIMIT_MAX
+
+        for _ in range(PUBLIC_MEMBERS_RATE_LIMIT_MAX):
+            response = self.client.get(reverse("api-v1-public-members"))
+            self.assertEqual(response.status_code, 200)
+
+    def test_requests_beyond_limit_are_throttled(self):
+        from accounts.public_views import PUBLIC_MEMBERS_RATE_LIMIT_MAX
+
+        for _ in range(PUBLIC_MEMBERS_RATE_LIMIT_MAX):
+            self.client.get(reverse("api-v1-public-members"))
+
+        response = self.client.get(reverse("api-v1-public-members"))
+        self.assertEqual(response.status_code, 429)
+
+    def test_different_client_ip_is_not_affected_by_another_ips_throttling(self):
+        from accounts.public_views import PUBLIC_MEMBERS_RATE_LIMIT_MAX
+
+        for _ in range(PUBLIC_MEMBERS_RATE_LIMIT_MAX + 1):
+            self.client.get(reverse("api-v1-public-members"), REMOTE_ADDR="203.0.113.5")
+
+        response = self.client.get(reverse("api-v1-public-members"), REMOTE_ADDR="203.0.113.9")
+        self.assertEqual(response.status_code, 200)
 
 
 class PublicMemberPhotoDerivativeTests(TestCase):
@@ -965,6 +1003,67 @@ class LoginRateLimitingTests(TestCase):
 
         response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
         self.assertEqual(response.status_code, 302)
+
+
+class PasswordResetRemovedAndSessionPolicyTests(TestCase):
+    """SEC-007: the half-wired password-reset flow (routes registered,
+    templates missing, no EMAIL_BACKEND) is removed rather than left to 500.
+    SEC-008: session lifetime is a deliberate, bounded idle timeout."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="sessionuser", password="testpass123")
+        cls.user.profile.vulgo = "SessionCheck"
+        cls.user.profile.save()
+
+    def test_password_reset_routes_are_gone_not_broken(self):
+        for path in (
+            "/accounts/password_reset/",
+            "/accounts/password_reset/done/",
+            "/accounts/reset/abc/def-token/",
+            "/accounts/reset/done/",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 404)
+
+    def test_no_reset_url_names_are_registered(self):
+        for name in ("password_reset", "password_reset_done", "password_reset_confirm", "password_reset_complete"):
+            with self.subTest(name=name):
+                with self.assertRaises(NoReverseMatch):
+                    reverse(name)
+
+    def test_login_logout_and_password_change_still_work(self):
+        self.assertTrue(reverse("login"))
+        self.assertTrue(reverse("logout"))
+        self.assertTrue(reverse("password_change"))
+        self.assertTrue(reverse("password_change_done"))
+
+        login_response = self.client.post(reverse("login"), {"username": "SessionCheck", "password": "testpass123"})
+        self.assertEqual(login_response.status_code, 302)
+
+    def test_session_cookie_age_matches_configured_idle_timeout(self):
+        from django.conf import settings as django_settings
+
+        self.client.login(username="sessionuser", password="testpass123")
+        self.assertEqual(self.client.session.get_expiry_age(), django_settings.SESSION_COOKIE_AGE)
+
+    def test_session_expiry_slides_forward_on_activity(self):
+        self.client.login(username="sessionuser", password="testpass123")
+        first_expiry = self.client.session.get_expiry_date()
+
+        # Advance wall-clock time without a real sleep, then make another
+        # authenticated request - SESSION_SAVE_EVERY_REQUEST=True should push
+        # the expiry forward, proving this is a sliding idle timeout rather
+        # than a fixed expiry from login time.
+        from unittest.mock import patch
+
+        later = timezone.now() + timedelta(minutes=30)
+        with patch("django.utils.timezone.now", return_value=later):
+            self.client.get(reverse("dashboard"))
+        second_expiry = self.client.session.get_expiry_date()
+
+        self.assertGreater(second_expiry, first_expiry)
 
 
 class ProfileMembershipModelTests(TestCase):
@@ -1778,4 +1877,51 @@ class MemorialImportCommandTests(TestCase):
 
         entry = MemorialEntry.objects.get(display_name="Historisch Kreuz")
         self.assertEqual(entry.legacy_marker, "")
+
+
+class BootstrapInternalCommandTests(TestCase):
+    """SEC-014: the initial-admin password must never be accepted as a CLI
+    argument (visible in `ps aux` / shell history) - only via an environment
+    variable (scripted/non-interactive) or an interactive, non-echoing prompt."""
+
+    def test_password_cli_flag_no_longer_exists(self):
+        with self.assertRaises(CommandError):
+            call_command("bootstrap_internal", "--username", "shouldfail", "--password", "leaked-on-cli")
+
+    def test_password_from_environment_variable_is_used(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"AVF_BOOTSTRAP_ADMIN_PASSWORD": "from-env-Secure123!"}):
+            call_command("bootstrap_internal", "--username", "env-admin", "--email", "env-admin@example.org")
+
+        user = User.objects.get(username="env-admin")
+        self.assertTrue(user.check_password("from-env-Secure123!"))
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+
+    def test_password_prompted_interactively_when_env_var_missing(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AVF_BOOTSTRAP_ADMIN_PASSWORD", None)
+            with patch("getpass.getpass", return_value="prompted-Secure123!") as mocked_prompt:
+                call_command("bootstrap_internal", "--username", "prompt-admin")
+            mocked_prompt.assert_called_once()
+
+        user = User.objects.get(username="prompt-admin")
+        self.assertTrue(user.check_password("prompted-Secure123!"))
+
+    def test_empty_password_everywhere_aborts_without_creating_a_user(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AVF_BOOTSTRAP_ADMIN_PASSWORD", None)
+            with patch("getpass.getpass", return_value=""):
+                with self.assertRaises(SystemExit):
+                    call_command("bootstrap_internal", "--username", "nopassword-admin")
+
+        self.assertFalse(User.objects.filter(username="nopassword-admin").exists())
 

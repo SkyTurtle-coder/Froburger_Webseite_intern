@@ -1,8 +1,19 @@
+import getpass
+import os
+
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 from accounts.models import Role
 from accounts.roles import ROLE_CHOICES
+
+# SEC-014: no --password CLI flag. Command-line arguments are visible to any
+# other process on the same host (`ps aux`) and get written to shell
+# history - unacceptable for a credential, even for a one-time provisioning
+# command. Scripted/non-interactive deployments should set this environment
+# variable (e.g. from a deploy-time secret store); anyone running the
+# command by hand gets prompted with getpass instead (no echo).
+PASSWORD_ENV_VAR = "AVF_BOOTSTRAP_ADMIN_PASSWORD"
 
 
 class Command(BaseCommand):
@@ -10,11 +21,16 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--username", type=str, help="Benutzername des initialen Admins")
-        parser.add_argument("--password", type=str, help="Passwort des initialen Admins")
         parser.add_argument("--email", type=str, default="", help="E-Mail des initialen Admins")
         parser.add_argument("--first-name", type=str, default="Admin", help="Vorname des initialen Admins")
         parser.add_argument("--last-name", type=str, default="Benutzer", help="Nachname des initialen Admins")
         parser.add_argument("--vulgo", type=str, default="", help="Vulgo des initialen Admins")
+
+    def _resolve_password(self):
+        password = os.environ.get(PASSWORD_ENV_VAR)
+        if password:
+            return password
+        return getpass.getpass("Passwort für den initialen Admin: ")
 
     def handle(self, *args, **options):
         for code, _label in ROLE_CHOICES:
@@ -22,12 +38,15 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Rollen sichergestellt."))
 
         username = options.get("username")
-        password = options.get("password")
         if not username:
             self.stdout.write("Kein Admin-Benutzer angefordert.")
             return
+
+        password = self._resolve_password()
         if not password:
-            raise SystemExit("Wenn --username gesetzt ist, muss auch --password gesetzt werden.")
+            raise SystemExit(
+                f"Ein Passwort ist erforderlich: entweder {PASSWORD_ENV_VAR} setzen oder interaktiv eingeben."
+            )
 
         User = get_user_model()
         user, created = User.objects.get_or_create(

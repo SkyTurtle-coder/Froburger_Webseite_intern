@@ -337,7 +337,11 @@ class DocumentManagementTests(TestCase):
         with CaptureQueriesContext(connection) as queries:
             response = self.client.get(reverse("document-scope", kwargs={"scope": "general"}))
         self.assertEqual(response.status_code, 200)
-        self.assertLessEqual(len(queries), 14)
+        # Budget raised from 14 to 16 (SEC-008): SESSION_SAVE_EVERY_REQUEST=True
+        # now writes the session on every request (a sliding idle timeout
+        # instead of a fixed 14-day expiry) - a couple of extra queries per
+        # request is the accepted cost of that security property.
+        self.assertLessEqual(len(queries), 16)
 
     def test_uploader_can_edit_own_general_document(self):
         self.login_uploader()

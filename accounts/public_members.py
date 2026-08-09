@@ -84,6 +84,11 @@ def build_public_members_payload():
     }
     public_member_ids = set()
 
+    # SEC-013: profile.pk is kept alongside each payload only long enough to
+    # break ties in a stable sort order - it's stripped again before the
+    # payload is returned, since the public API itself no longer exposes it.
+    ranked_members = {section_key: [] for section_key in sections}
+
     for profile in profiles:
         if not is_public_member(profile):
             continue
@@ -93,10 +98,12 @@ def build_public_members_payload():
         public_member_ids.add(profile.pk)
 
         for section_key, public_roles in roles_by_section.items():
-            sections[section_key]["members"].append(_member_payload(profile, public_roles))
+            ranked_members[section_key].append((profile.pk, _member_payload(profile, public_roles)))
 
-    for section in sections.values():
-        section["members"].sort(key=_member_sort_key)
+    for section_key, section in sections.items():
+        entries = ranked_members[section_key]
+        entries.sort(key=_member_sort_key)
+        section["members"] = [payload for _profile_pk, payload in entries]
         section["count"] = len(section["members"])
 
     normalized = {
@@ -138,7 +145,12 @@ def _member_payload(profile, public_roles):
     entry_display = profile.entry_term_display
 
     return {
-        "id": profile.pk,
+        # SEC-013: the internal database PK used to be exposed here with no
+        # display purpose (WordPress's own consumer code already falls back
+        # to md5(display_name) for its DOM-element IDs when this key is
+        # absent - see avf-members-page.php - so nothing on that side needed
+        # to change). Removed from both this payload and _content_hash()
+        # below; keep those two in sync if this ever changes again.
         "display_name": display_name,
         "name": display_name,
         "first_name": profile.first_name,
@@ -161,13 +173,14 @@ def _member_payload(profile, public_roles):
     }
 
 
-def _member_sort_key(member):
+def _member_sort_key(ranked_entry):
+    profile_pk, member = ranked_entry
     first_role = member["roles"][0] if member["roles"] else {"sort_order": 999}
     return (
         first_role["sort_order"],
         member["last_name"].casefold(),
         member["first_name"].casefold(),
-        member["id"],
+        profile_pk,
     )
 
 
@@ -180,7 +193,9 @@ def _content_hash(payload):
             "count": section["count"],
             "members": [
                 {
-                    "id": member["id"],
+                    # SEC-013: "id" deliberately excluded - keep in sync with
+                    # avf-members-page.php::build_hash_payload() on the
+                    # WordPress side, which must hash the exact same fields.
                     "display_name": member["display_name"],
                     "first_name": member["first_name"],
                     "last_name": member["last_name"],

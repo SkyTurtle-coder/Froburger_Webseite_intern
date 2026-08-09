@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib import admin
 from django.conf.urls.static import static
+from django.contrib.auth.views import LogoutView, PasswordChangeDoneView, PasswordChangeView
 from django.urls import include, path
 
 from accounts.public_views import v1_public_members_api
@@ -33,7 +34,15 @@ urlpatterns = [
     path("api/v1/public/events/<slug:slug>/signup/", v1_event_signup_api, name="api-v1-event-signup"),
     path("api/v1/public/members/", v1_public_members_api, name="api-v1-public-members"),
     path("accounts/login/", PortalLoginView.as_view(), name="login"),
-    path("accounts/", include("django.contrib.auth.urls")),
+    path("accounts/logout/", LogoutView.as_view(), name="logout"),
+    path("accounts/password_change/", PasswordChangeView.as_view(), name="password_change"),
+    path("accounts/password_change/done/", PasswordChangeDoneView.as_view(), name="password_change_done"),
+    # SEC-007: django.contrib.auth.urls also bundles password_reset/*, which
+    # this project deliberately does not offer (no EMAIL_BACKEND is
+    # configured, and account resets are handled by an ADMIN, not
+    # self-service) - the templates for that flow don't exist either, so
+    # leaving those routes wired up meant they 500'd for anyone who found
+    # them. Only including the routes actually implemented and tested.
     path("accounts/", include("accounts.urls")),
     path("anlaesse/", include("events.urls")),
     path("dokumente/", include("documents.urls")),

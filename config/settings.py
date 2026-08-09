@@ -192,6 +192,15 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env_path("MEDIA_ROOT", default=BASE_DIR / "media")
 
+# SEC-008: an internal portal holding private documents/obituaries shouldn't
+# default to Django's 2-week rolling session with no idle timeout. 8 hours
+# (one working day) with SESSION_SAVE_EVERY_REQUEST=True gives a sliding idle
+# timeout (extends while the member is active, expires 8h after the last
+# request) rather than a hard cutoff mid-session. Configurable in case this
+# turns out to be too short/long in practice.
+SESSION_COOKIE_AGE = env_int("DJANGO_SESSION_COOKIE_AGE", 8 * 60 * 60)
+SESSION_SAVE_EVERY_REQUEST = True
+
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
