@@ -7,6 +7,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from config.settings import env_bool, is_secret_key_acceptable
 from events.models import Event
 
 
@@ -82,3 +83,46 @@ class VerifyWordPressEventContractCommandTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command("verify_wordpress_event_contract")
+
+
+class SettingsFailSafeGuardTests(TestCase):
+    """SEC-003 / SEC-015: an incomplete production environment must never
+    silently resolve to an insecure default."""
+
+    def test_debug_defaults_to_false_when_env_var_is_missing(self):
+        self.assertFalse(env_bool("DJANGO_DEBUG_DOES_NOT_EXIST_IN_ENV", False))
+
+    def test_debug_env_var_explicit_values_still_respected(self):
+        import os
+
+        os.environ["DJANGO_DEBUG_TEST_TRUE"] = "True"
+        os.environ["DJANGO_DEBUG_TEST_FALSE"] = "False"
+        try:
+            self.assertTrue(env_bool("DJANGO_DEBUG_TEST_TRUE", False))
+            self.assertFalse(env_bool("DJANGO_DEBUG_TEST_FALSE", True))
+        finally:
+            del os.environ["DJANGO_DEBUG_TEST_TRUE"]
+            del os.environ["DJANGO_DEBUG_TEST_FALSE"]
+
+    def test_known_placeholders_are_rejected(self):
+        for placeholder in (
+            "change-me",
+            "django-insecure-change-me",
+            "replace-with-strong-secret",
+            "replace-with-local-secret",
+        ):
+            self.assertFalse(is_secret_key_acceptable(placeholder), placeholder)
+
+    def test_django_startproject_style_placeholder_is_rejected(self):
+        self.assertFalse(is_secret_key_acceptable("django-insecure-abcdefghijklmnopqrstuvwxyz"))
+
+    def test_implausibly_short_key_is_rejected(self):
+        self.assertFalse(is_secret_key_acceptable("short-key-123"))
+
+    def test_empty_key_is_rejected(self):
+        self.assertFalse(is_secret_key_acceptable(""))
+
+    def test_a_real_generated_key_is_accepted(self):
+        from django.core.management.utils import get_random_secret_key
+
+        self.assertTrue(is_secret_key_acceptable(get_random_secret_key()))

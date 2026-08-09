@@ -48,11 +48,44 @@ def env_path(*names, default):
     return Path(raw).expanduser()
 
 
-SECRET_KEY = env_str("DJANGO_SECRET_KEY", required=True)
-if SECRET_KEY in {"change-me", "django-insecure-change-me", "replace-with-strong-secret"}:
-    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set to a non-placeholder value.")
+# SEC-015: reject known placeholders from every template shipped in this repo
+# (.env.example, .env.production.example, deploy/*.example), Django's own
+# "django-insecure-..." startproject prefix, and anything implausibly short
+# to be a real generated key - while staying out of the way of any real
+# secret a deployer actually generates (e.g. get_random_secret_key(), 50 chars).
+SECRET_KEY_PLACEHOLDERS = {
+    "change-me",
+    "django-insecure-change-me",
+    "replace-with-strong-secret",
+    "replace-with-local-secret",
+}
+SECRET_KEY_MIN_LENGTH = 20
 
-DEBUG = env_bool("DJANGO_DEBUG", True)
+
+def is_secret_key_acceptable(value):
+    if not value:
+        return False
+    if value in SECRET_KEY_PLACEHOLDERS:
+        return False
+    if value.startswith("django-insecure-"):
+        return False
+    if len(value) < SECRET_KEY_MIN_LENGTH:
+        return False
+    return True
+
+
+SECRET_KEY = env_str("DJANGO_SECRET_KEY", required=True)
+if not is_secret_key_acceptable(SECRET_KEY):
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY must be set to a real, non-placeholder value of at "
+        "least 20 characters (e.g. via django.core.management.utils."
+        "get_random_secret_key())."
+    )
+
+# SEC-003: fail safe. If DJANGO_DEBUG is ever missing from the environment
+# (e.g. an incomplete systemd EnvironmentFile), the app must come up in
+# production mode, not with tracebacks/settings visible to every visitor.
+DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1")
 CSRF_TRUSTED_ORIGINS = env_list(
     "DJANGO_CSRF_TRUSTED_ORIGINS",
