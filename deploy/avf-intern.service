@@ -14,5 +14,32 @@ RestartSec=5
 PrivateTmp=true
 NoNewPrivileges=true
 
+# SEC-023: additional hardening with essentially no legitimate use case for
+# this service (a plain ASGI web app never touches kernel tunables/modules,
+# cgroups, SUID/SGID binaries, personality syscalls, or anything under
+# /home) - applied here since none of these have a plausible way to break
+# uploads or DB access. Not verified on a real systemd host from this
+# environment (Windows dev checkout, no systemd available) - please confirm
+# with `sudo systemctl daemon-reload && sudo systemctl restart avf-intern &&
+# sudo systemctl status avf-intern` and a real upload/download smoke test
+# after deploying this file.
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# NOT applied here, left as a documented follow-up: ProtectSystem=strict
+# would additionally make the whole filesystem read-only except explicitly
+# listed ReadWritePaths= - it needs at least
+# "ReadWritePaths=/srv/avf-intern/media" for document/photo uploads to keep
+# working, and possibly more depending on exactly what MEDIA_ROOT/STATIC_ROOT
+# resolve to on the real host. Test this one manually, stepwise, with a real
+# upload afterwards, rather than assuming the path list above is complete
+# from a repo read alone:
+#   ProtectSystem=strict
+#   ReadWritePaths=/srv/avf-intern/media
+
 [Install]
 WantedBy=multi-user.target

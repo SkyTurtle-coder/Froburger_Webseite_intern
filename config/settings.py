@@ -114,6 +114,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "core.middleware.ContentSecurityPolicyReportOnlyMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -247,3 +248,53 @@ SECURE_CONTENT_TYPE_NOSNIFF = env_bool("DJANGO_SECURE_CONTENT_TYPE_NOSNIFF", Tru
 X_FRAME_OPTIONS = os.getenv("DJANGO_X_FRAME_OPTIONS", "DENY")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# SEC-022: explicit LOGGING config so production errors/security warnings
+# reliably reach journalctl (the systemd service's stdout/stderr sink - see
+# deploy/avf-intern.service) in a consistent, filterable format, instead of
+# relying on Django's implicit defaults. This only configures HOW Django's
+# own logger calls are formatted/routed - it does not add any new logging of
+# passwords, tokens, session IDs, CSRF tokens, Authorization headers, or full
+# request bodies (the application's own logger.* calls, in documents/views.py
+# and events/public_views.py, were checked to confirm neither does either).
+# Deliberately no external error-tracking service (e.g. Sentry) wired in
+# here - that would be a new external data transmission and a deliberate
+# product/ops decision on its own, not something to add as a side effect.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "[{asctime}] {levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Suspicious operations, disallowed hosts, CSRF failures, etc.
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}

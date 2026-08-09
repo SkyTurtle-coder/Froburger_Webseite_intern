@@ -126,3 +126,22 @@ class SettingsFailSafeGuardTests(TestCase):
         from django.core.management.utils import get_random_secret_key
 
         self.assertTrue(is_secret_key_acceptable(get_random_secret_key()))
+
+
+class ContentSecurityPolicyReportOnlyTests(TestCase):
+    """SEC-017: the CSP is deployed Report-Only - it must never appear as an
+    enforcing header, on any response, until that's a deliberate decision."""
+
+    def test_report_only_header_present_on_a_public_page(self):
+        response = self.client.get("/healthz/")
+        self.assertIn("Content-Security-Policy-Report-Only", response.headers)
+
+    def test_never_sends_an_enforcing_csp_header(self):
+        response = self.client.get("/healthz/")
+        # Header lookups are case-insensitive and "Content-Security-Policy"
+        # is a prefix of "Content-Security-Policy-Report-Only" - checking
+        # for exact equality against the response's actual header names
+        # avoids a false pass if a substring check were used instead.
+        header_names = {name.lower() for name in response.headers.keys()}
+        self.assertNotIn("content-security-policy", header_names)
+        self.assertIn("content-security-policy-report-only", header_names)
