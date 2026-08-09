@@ -10,7 +10,10 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from accounts.models import CalendarSubscription, Role
+from events import signing
 from events.models import Event, EventSignup, EventSignupColumn
+
+TEST_SIGNUP_SECRET = "test-signing-secret-not-a-real-value"
 
 
 class EventModelTests(TestCase):
@@ -334,6 +337,7 @@ class EventPublicApiTests(TestCase):
             reverse("public-event-detail", kwargs={"slug": self.internal_wordpress.slug})
 
 
+@override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
 class EventPublicSignupApiTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -372,6 +376,12 @@ class EventPublicSignupApiTests(TestCase):
     def setUp(self):
         cache.clear()
 
+    @staticmethod
+    def _auth_headers():
+        # Legacy shared-secret header - still accepted during the SEC-005
+        # migration window alongside the newer signed-request scheme.
+        return {"HTTP_X_AVF_EVENT_SECRET": TEST_SIGNUP_SECRET}
+
     def test_signup_api_creates_signup(self):
         response = self.client.post(
             reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
@@ -386,6 +396,7 @@ class EventPublicSignupApiTests(TestCase):
                 }
             ),
             content_type="application/json",
+            **self._auth_headers(),
         )
 
         self.assertEqual(response.status_code, 201)
@@ -413,6 +424,7 @@ class EventPublicSignupApiTests(TestCase):
                 }
             ),
             content_type="application/json",
+            **self._auth_headers(),
         )
 
         self.assertEqual(response.status_code, 409)
@@ -429,6 +441,7 @@ class EventPublicSignupApiTests(TestCase):
                 }
             ),
             content_type="application/json",
+            **self._auth_headers(),
         )
 
         self.assertEqual(response.status_code, 400)
@@ -449,6 +462,7 @@ class EventPublicSignupApiTests(TestCase):
                 }
             ),
             content_type="application/json",
+            **self._auth_headers(),
         )
 
         self.assertEqual(response.status_code, 409)
@@ -483,6 +497,7 @@ class EventPublicSignupApiTests(TestCase):
                 }
             ),
             content_type="application/json",
+            **self._auth_headers(),
         )
         second = self.client.post(
             reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
@@ -494,11 +509,141 @@ class EventPublicSignupApiTests(TestCase):
                 }
             ),
             content_type="application/json",
+            **self._auth_headers(),
         )
 
         self.assertEqual(first.status_code, 201)
         self.assertEqual(second.status_code, 429)
         self.assertEqual(second.json()["code"], "rate_limited")
+
+
+class EventSignupApiAuthenticationTests(TestCase):
+    """SEC-005: the signup endpoint must fail closed, verify HMAC-signed
+    requests correctly, and reject stale/replayed/tampered ones."""
+
+    @classmethod
+    def setUpTestData(cls):
+        now = timezone.now() + timedelta(days=3)
+        cls.event = Event.objects.create(
+            title="Signierter Anlass",
+            short_description="Kurz",
+            description="Volltext",
+            start=now,
+            end=now + timedelta(hours=2),
+            location="Basel",
+            status="OFF",
+            is_public=True,
+            signup_enabled=True,
+        )
+
+    def setUp(self):
+        cache.clear()
+
+    def _body(self, vulgo="Riemann"):
+        return json.dumps({"vulgo": vulgo, "attending": True, "values": {}}).encode("utf-8")
+
+    def _post(self, body, headers=None):
+        return self.client.post(
+            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
+            data=body,
+            content_type="application/json",
+            **(headers or {}),
+        )
+
+    def _signed_headers(self, slug, body, secret=TEST_SIGNUP_SECRET, timestamp=None):
+        ts = str(int(timestamp if timestamp is not None else timezone.now().timestamp()))
+        signature = signing.compute_signature(secret, slug, ts, body)
+        return {
+            "HTTP_X_AVF_TIMESTAMP": ts,
+            "HTTP_X_AVF_SIGNATURE": signature,
+        }
+
+    def test_signup_rejected_when_secret_not_configured(self):
+        # No override_settings here: PUBLIC_EVENT_SIGNUP_SHARED_SECRET is "" by
+        # default in the test environment - this must never be treated as "no
+        # auth required" (the SEC-005 bug being fixed).
+        body = self._body()
+        response = self._post(body, self._signed_headers(self.event.slug, body, secret="anything"))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "signup_unavailable")
+        self.assertFalse(EventSignup.objects.filter(event=self.event).exists())
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_accepts_valid_signature(self):
+        body = self._body("Riemann")
+        response = self._post(body, self._signed_headers(self.event.slug, body))
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(EventSignup.objects.filter(event=self.event, normalized_vulgo="riemann").exists())
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_rejects_invalid_signature(self):
+        body = self._body("Cauchy")
+        headers = self._signed_headers(self.event.slug, body)
+        headers["HTTP_X_AVF_SIGNATURE"] = "0" * 64
+        response = self._post(body, headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "invalid_authentication")
+        self.assertFalse(EventSignup.objects.filter(event=self.event).exists())
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_rejects_stale_timestamp(self):
+        body = self._body("Fourier")
+        stale = timezone.now().timestamp() - (signing.DEFAULT_TOLERANCE_SECONDS + 60)
+        response = self._post(body, self._signed_headers(self.event.slug, body, timestamp=stale))
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "invalid_authentication")
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_rejects_body_tampered_after_signing(self):
+        signed_body = self._body("Laplace")
+        headers = self._signed_headers(self.event.slug, signed_body)
+        tampered_body = self._body("Laplace-Angreifer")
+        response = self._post(tampered_body, headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(EventSignup.objects.filter(event=self.event).exists())
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_rejects_signature_issued_for_a_different_event(self):
+        other_event = Event.objects.create(
+            title="Anderer Anlass",
+            short_description="Kurz",
+            description="Text",
+            start=self.event.start,
+            end=self.event.end,
+            location="Bern",
+            status="OFF",
+            is_public=True,
+            signup_enabled=True,
+        )
+        body = self._body("Hilbert")
+        # Signed for other_event.slug, but replayed against self.event's URL.
+        headers = self._signed_headers(other_event.slug, body)
+        response = self._post(body, headers)
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_rejects_replayed_signature(self):
+        body = self._body("Poincare")
+        headers = self._signed_headers(self.event.slug, body)
+        first = self._post(body, headers)
+        self.assertEqual(first.status_code, 201)
+
+        replay_body = self._body("Poincare-Replay")
+        replay = self._post(replay_body, headers)
+        self.assertEqual(replay.status_code, 403)
+        self.assertFalse(EventSignup.objects.filter(normalized_vulgo="poincare-replay").exists())
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_still_accepts_legacy_secret_header(self):
+        body = self._body("Legacy")
+        response = self._post(body, {"HTTP_X_AVF_EVENT_SECRET": TEST_SIGNUP_SECRET})
+        self.assertEqual(response.status_code, 201)
+
+    @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
+    def test_signup_rejects_wrong_legacy_secret(self):
+        body = self._body("Legacy-Wrong")
+        response = self._post(body, {"HTTP_X_AVF_EVENT_SECRET": "wrong-secret"})
+        self.assertEqual(response.status_code, 403)
 
 
 class PrivateCalendarFeedTests(TestCase):

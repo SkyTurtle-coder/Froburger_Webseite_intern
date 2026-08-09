@@ -1,6 +1,5 @@
 import hashlib
 import json
-import secrets
 
 from django.conf import settings
 from django.core.cache import cache
@@ -12,6 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from accounts.models import CalendarSubscription
 
+from . import signing
 from .calendar_service import CalendarFeedService, CalendarResponseBuilder
 from .models import Event, EventSignup, EventSignupColumn
 
@@ -287,15 +287,40 @@ def _normalize_signup_payload(event, payload):
     return {"vulgo": vulgo, "attending": attending, "values": cleaned_values}, None
 
 
-def _require_signup_secret(request):
+def _signup_replay_cache_key(signature):
+    return "public-event-signup-sig:" + hashlib.sha256(signature.encode("utf-8")).hexdigest()
+
+
+def _authenticate_signup_request(request, slug):
+    """Authenticates a signup POST. Fails closed: an unconfigured secret always rejects.
+
+    Accepts either a signed request (X-AVF-Timestamp + X-AVF-Signature, an
+    HMAC-SHA256 over method/slug/timestamp/body-hash, replay-protected via a
+    short-lived cache entry) or, for a controlled migration window, the
+    legacy bare shared-secret header. See SEC-005.
+    """
     secret = settings.PUBLIC_EVENT_SIGNUP_SHARED_SECRET
     if not secret:
+        return _error_response(
+            "signup_unavailable",
+            "Anmeldungen sind derzeit nicht verfuegbar.",
+            503,
+        )
+
+    signature = request.headers.get(signing.SIGNATURE_HEADER, "")
+    if signature:
+        timestamp = request.headers.get(signing.TIMESTAMP_HEADER, "")
+        if not signing.verify_signed_request(secret, slug, timestamp, request.body, signature):
+            return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
+        if not cache.add(_signup_replay_cache_key(signature), True, timeout=signing.DEFAULT_TOLERANCE_SECONDS * 2):
+            return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
         return None
 
-    provided = request.headers.get("X-AVF-Event-Secret", "")
-    if not secrets.compare_digest(provided, secret):
-        return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
-    return None
+    provided = request.headers.get(signing.LEGACY_SECRET_HEADER, "")
+    if signing.verify_legacy_secret(secret, provided):
+        return None
+
+    return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
 
 
 def legacy_upcoming_events_api(request):
@@ -329,7 +354,7 @@ def v1_event_signup_api(request, slug):
     if request.method != "POST":
         return _error_response("method_not_allowed", "Nur POST ist erlaubt.", 405)
 
-    auth_error = _require_signup_secret(request)
+    auth_error = _authenticate_signup_request(request, slug)
     if auth_error is not None:
         return auth_error
 

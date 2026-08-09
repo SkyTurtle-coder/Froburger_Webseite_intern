@@ -32,12 +32,28 @@ Pflichtig:
 - `DB_PORT=3306`
 - `STATIC_ROOT=/srv/avf-intern/static`
 - `MEDIA_ROOT=/srv/avf-intern/media`
+- `PUBLIC_EVENT_SIGNUP_SHARED_SECRET` - shared secret for the WordPress -> Django
+  event-signup API (see SEC-005 in the security audit). Must be the same long
+  random value configured on the WordPress side
+  (`AVF_EVENTS_SIGNUP_SHARED_SECRET`). Leaving it unset does **not** open the
+  endpoint - the view now fails closed and returns HTTP 503 for every signup
+  attempt until a real secret is set on both sides.
 
-Optional fuer HTTP-Tests ueber die spaetere Domain, solange noch kein Zertifikat aktiv ist:
+DNS and TLS for `intern.avfroburger.ch` are live in production. The current
+required values are:
+
+- `DJANGO_SECURE_SSL_REDIRECT=True`
+- `DJANGO_SESSION_COOKIE_SECURE=True`
+- `DJANGO_CSRF_COOKIE_SECURE=True`
+- `DJANGO_SECURE_HSTS_SECONDS=15552000` (180 days; ramp towards `63072000` once
+  stable, see "Naechster Schritt nach DNS" below)
+- `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=True`
+
+Optional, only during the brief bring-up window for a *brand-new* host before
+DNS/Certbot are done (never on the existing production host):
 
 - `DJANGO_CSRF_TRUSTED_ORIGINS=https://intern.avfroburger.ch,https://intern-avfroburger.ch,http://intern.avfroburger.ch`
-
-Bis DNS und HTTPS final bereit sind, keine HSTS- oder Redirect-Zwaenge aktivieren.
+- the five settings above temporarily set to `False`/`0` per `deploy/env.example`'s comments
 
 ## Zugriffspolitik fuer Medien
 
@@ -95,10 +111,21 @@ sudo ss -ltnp
 
 ## Naechster Schritt nach DNS
 
-Sobald `intern.avfroburger.ch` nachweislich auf `179.237.81.250` zeigt:
+**Status: abgeschlossen.** Live-Checks im Rahmen des Security-Audits (2026-08-09)
+bestaetigen HTTPS, HSTS und Secure-Cookies auf `intern-avfroburger.ch`. Fuer
+einen komplett neuen Host waeren die Schritte:
 
 1. `PUBLIC_EVENT_SOURCE_BASE_URL` und `PUBLIC_MEDIA_BASE_URL` auf `https://intern.avfroburger.ch` umstellen.
 2. `DJANGO_CSRF_TRUSTED_ORIGINS` auf `https://intern.avfroburger.ch` belassen oder bereinigen.
 3. Certbot fuer `intern.avfroburger.ch` ausfuehren.
 4. Nginx auf HTTPS erweitern.
-5. Danach `DJANGO_SECURE_SSL_REDIRECT=True`, `DJANGO_SESSION_COOKIE_SECURE=True`, `DJANGO_CSRF_COOKIE_SECURE=True` und HSTS sinnvoll aktivieren.
+5. Danach `DJANGO_SECURE_SSL_REDIRECT=True`, `DJANGO_SESSION_COOKIE_SECURE=True`, `DJANGO_CSRF_COOKIE_SECURE=True` und HSTS sinnvoll aktivieren (siehe Werte oben).
+
+**Offen, bitte auf dem Server pruefen und ggf. nachziehen:** ob die reale
+`/etc/avf-intern/avf-intern.env` bereits `PUBLIC_EVENT_SIGNUP_SHARED_SECRET`
+gesetzt hat. Ein Live-Check ohne echte Anmeldung zu erzeugen (nicht
+existierender Event-Slug, keine Auth-Header) ergab am 2026-08-09 `event_not_found`
+statt einer Auth-Ablehnung - das Secret war zu diesem Zeitpunkt **NOT SET**,
+d.h. die Anmelde-API lief offen. Nach diesem Fix (Code faellt jetzt closed)
+muss ein echtes Secret auf Server *und* WordPress-Seite gesetzt werden, sonst
+bleiben Anmeldungen mit HTTP 503 blockiert.
