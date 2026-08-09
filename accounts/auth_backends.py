@@ -9,6 +9,17 @@ class EmailOrVulgoBackend(ModelBackend):
     def normalize_identifier(value):
         return " ".join((value or "").strip().split()).casefold()
 
+    @staticmethod
+    def _run_dummy_password_hasher(password):
+        """Performs the same hashing work a real check_password() call would,
+        against a transient, unsaved user. Mirrors Django's own ModelBackend
+        mitigation for the "unknown identifier" timing side-channel (Django
+        ticket #20760) - without it, a request for an unregistered email/vulgo
+        returns markedly faster than one for a registered identifier with the
+        wrong password, letting an attacker infer which identifiers exist
+        purely from response time (SEC-001)."""
+        User().set_password(password)
+
     def authenticate(self, request, username=None, password=None, **kwargs):
         identifier = username or kwargs.get(User.USERNAME_FIELD) or ""
         normalized_identifier = self.normalize_identifier(identifier)
@@ -22,8 +33,9 @@ class EmailOrVulgoBackend(ModelBackend):
                 if user.check_password(password) and self.user_can_authenticate(user):
                     return user
                 return None
-            if len(users) > 1:
-                return None
+            # Zero or ambiguous (>1) matches for this email.
+            self._run_dummy_password_hasher(password)
+            return None
 
         matches = []
         for profile in Profile.objects.select_related("user").exclude(vulgo=""):
@@ -32,6 +44,7 @@ class EmailOrVulgoBackend(ModelBackend):
                 if len(matches) > 1:
                     break
         if len(matches) != 1:
+            self._run_dummy_password_hasher(password)
             return None
 
         user = matches[0].user

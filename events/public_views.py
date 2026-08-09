@@ -159,9 +159,15 @@ def _build_list_response(request, queryset, *, include_pagination):
 
 
 def _client_ip(request):
+    # deploy/nginx-avf-intern.conf sets X-Forwarded-For to
+    # $proxy_add_x_forwarded_for, which APPENDS the real peer address after
+    # whatever the client sent - the trustworthy value is therefore the LAST
+    # entry, not the first (which a client can freely spoof).
     forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
     if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+        parts = [part.strip() for part in forwarded_for.split(",") if part.strip()]
+        if parts:
+            return parts[-1]
     return request.META.get("REMOTE_ADDR", "unknown")
 
 

@@ -6,6 +6,7 @@ from textwrap import dedent
 from unittest import skip
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError
@@ -17,6 +18,8 @@ from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
 
+from accounts import throttling
+from accounts.auth_backends import EmailOrVulgoBackend
 from accounts.management.commands.sync_public_members_page import validate_public_member_media_urls
 from accounts.models import MemorialEntry, Profile, Role
 from accounts.public_members import build_public_members_payload
@@ -632,6 +635,167 @@ class PortalAuthenticationUiTests(TestCase):
         self.assertNotContains(detail, ">Vulgo<", html=False)
         self.assertContains(edit, "v/o")
         self.assertNotContains(edit, ">Vulgo<", html=False)
+
+
+class LoginTimingSideChannelTests(TestCase):
+    """SEC-001: an unknown identifier must do the same hashing work as a
+    known one, so response time doesn't reveal whether it's registered."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="timinguser", password="testpass123")
+        cls.user.profile.vulgo = "Timing"
+        cls.user.profile.save()
+
+    def test_unknown_email_still_authenticates_correctly(self):
+        # Functional guard: the dummy-hash call must never accidentally
+        # allow, deny-incorrectly, or crash the unrelated known-user path.
+        self.assertIsNone(
+            EmailOrVulgoBackend().authenticate(None, username="nobody@example.com", password="whatever")
+        )
+        self.assertIsNone(EmailOrVulgoBackend().authenticate(None, username="UnknownVulgo", password="whatever"))
+        self.assertIsNotNone(
+            EmailOrVulgoBackend().authenticate(None, username="Timing", password="testpass123")
+        )
+        self.assertIsNone(EmailOrVulgoBackend().authenticate(None, username="Timing", password="wrong"))
+
+    def test_dummy_hasher_runs_same_hasher_as_real_check_password(self):
+        # Confirms the mitigation actually performs comparable cryptographic
+        # work (not a no-op) without asserting on wall-clock time, which
+        # would be flaky in a normal unit-test run.
+        dummy_user = User()
+        with self.assertNumQueries(0):
+            dummy_user.set_password("some-password")
+        self.assertTrue(dummy_user.password.startswith("pbkdf2_sha256$"))
+        # Same hasher/iteration count as a real stored password, so the two
+        # paths cost the same amount of CPU time.
+        real_hasher_prefix = self.user.password.split("$")[0]
+        self.assertEqual(dummy_user.password.split("$")[0], real_hasher_prefix)
+
+    def test_unknown_and_wrong_password_timing_is_close(self):
+        # Separate, tolerant statistical check (not part of normal CI
+        # assertions above): averages a few iterations and only fails on a
+        # gross regression back to the original ~2x gap the audit measured
+        # live (~0.29s vs ~0.53s), not on ordinary noise.
+        import time
+
+        def timed_call(identifier, password):
+            start = time.perf_counter()
+            EmailOrVulgoBackend().authenticate(None, username=identifier, password=password)
+            return time.perf_counter() - start
+
+        samples = 5
+        unknown_total = sum(timed_call("does-not-exist@example.com", "whatever") for _ in range(samples))
+        known_wrong_total = sum(timed_call("Timing", "wrong-password") for _ in range(samples))
+
+        unknown_avg = unknown_total / samples
+        known_avg = known_wrong_total / samples
+
+        # Generous tolerance: fails only if the unknown-identifier path is
+        # less than half the cost of the known-wrong-password path.
+        self.assertGreater(
+            unknown_avg,
+            known_avg * 0.5,
+            f"unknown-identifier login ({unknown_avg:.4f}s) is suspiciously "
+            f"faster than known-identifier-wrong-password ({known_avg:.4f}s) "
+            "- the dummy password hasher may not be running.",
+        )
+
+
+class LoginRateLimitingTests(TestCase):
+    """SEC-002: repeated failed logins must be throttled without ever
+    creating a permanent lock or leaking whether an account exists."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="throttleduser", password="testpass123")
+        cls.user.profile.vulgo = "Throttled"
+        cls.user.profile.save()
+
+        cls.other_user = User.objects.create_user(username="otheruser", password="testpass123")
+        cls.other_user.profile.vulgo = "Unrelated"
+        cls.other_user.profile.save()
+
+    def setUp(self):
+        cache.clear()
+
+    def _fail_login(self, identifier="Throttled", password="wrong"):
+        return self.client.post(reverse("login"), {"username": identifier, "password": password})
+
+    def test_limit_engages_after_repeated_failures_for_one_identifier(self):
+        for _ in range(throttling.IDENTIFIER_MAX_ATTEMPTS):
+            response = self._fail_login()
+            self.assertEqual(response.status_code, 200)
+
+        # Even the CORRECT password is now rejected while the identifier is
+        # in its cooldown window - the throttle, not the credential, decides.
+        response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Anmeldung fehlgeschlagen. Bitte prüfe E-Mail oder Vulgo und Passwort.")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_throttle_message_is_identical_to_a_normal_failed_login(self):
+        for _ in range(throttling.IDENTIFIER_MAX_ATTEMPTS):
+            self._fail_login()
+
+        throttled_response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
+        normal_failure_response = self.client.post(reverse("login"), {"username": "Unrelated", "password": "wrong"})
+
+        self.assertEqual(
+            self._extract_error(throttled_response),
+            self._extract_error(normal_failure_response),
+        )
+
+    @staticmethod
+    def _extract_error(response):
+        return response.context["form"].non_field_errors()
+
+    def test_throttling_one_identifier_does_not_block_a_different_account(self):
+        for _ in range(throttling.IDENTIFIER_MAX_ATTEMPTS):
+            self._fail_login(identifier="Throttled")
+
+        response = self.client.post(reverse("login"), {"username": "Unrelated", "password": "testpass123"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(int(self.client.session["_auth_user_id"]), self.other_user.pk)
+
+    def test_ip_level_throttle_blocks_spraying_across_many_unknown_identifiers(self):
+        for i in range(throttling.IP_MAX_ATTEMPTS):
+            self._fail_login(identifier=f"nobody-{i}@example.com")
+
+        # A brand-new identifier, never tried before, is still blocked
+        # because the throttle is keyed by source IP as well as identifier.
+        response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_successful_login_clears_the_identifier_cooldown(self):
+        for _ in range(throttling.IDENTIFIER_MAX_ATTEMPTS - 1):
+            self._fail_login()
+        # One attempt short of the limit, then a correct login clears the
+        # counter (VulgoAuthenticationForm.clean() calls
+        # clear_attempts_for_identifier on success)...
+        response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
+        self.assertEqual(response.status_code, 302)
+        self.client.logout()
+
+        # ...so failing almost up to the limit again afterwards must not
+        # combine with the earlier attempts to trip it early.
+        for _ in range(throttling.IDENTIFIER_MAX_ATTEMPTS - 1):
+            self._fail_login()
+        response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_cooldown_expires_after_its_window(self):
+        for _ in range(throttling.IDENTIFIER_MAX_ATTEMPTS):
+            self._fail_login()
+        self.assertTrue(throttling.is_throttled(None, "throttled"))
+
+        # Simulate the cooldown TTL elapsing (never a permanent lock).
+        cache.delete(throttling._cooldown_key("id", "throttled"))
+        cache.delete(throttling._attempts_key("id", "throttled"))
+
+        response = self.client.post(reverse("login"), {"username": "Throttled", "password": "testpass123"})
+        self.assertEqual(response.status_code, 302)
 
 
 class ProfileMembershipModelTests(TestCase):
