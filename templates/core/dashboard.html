@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block page_title %}Übersicht{% endblock %}
+
+{% block content %}
+<section class="hero-card">
+    <div class="dashboard-profile">
+        <div class="dashboard-profile__media">
+            {% if profile_obj.photo %}
+            <img src="{% url 'profile-photo' profile_obj.pk %}" alt="{{ profile_obj.display_name }}" class="avatar-card__image">
+            {% else %}
+            <div class="avatar-card__placeholder">{{ profile_obj.first_name|slice:":1" }}{{ profile_obj.last_name|slice:":1" }}</div>
+            {% endif %}
+        </div>
+        <div class="dashboard-profile__content">
+            <p class="section-kicker">Dashboard</p>
+            <h2>{{ profile_obj.full_name_with_title }}</h2>
+            {% if profile_obj.vulgo %}
+            <p class="dashboard-profile__subtitle">v/o {{ profile_obj.vulgo }}</p>
+            {% endif %}
+            <div class="dashboard-profile__facts">
+                <div class="dashboard-profile__fact">
+                    <span class="metric__label">Status</span>
+                    <strong>{{ profile_obj.membership_status_label }}</strong>
+                </div>
+                {% if profile_obj.degree_program %}
+                <div class="dashboard-profile__fact">
+                    <span class="metric__label">Studiengang</span>
+                    <strong>{{ profile_obj.degree_program }}</strong>
+                </div>
+                {% endif %}
+                {% if profile_obj.academic_title %}
+                <div class="dashboard-profile__fact">
+                    <span class="metric__label">Abschluss / Titel</span>
+                    <strong>{{ profile_obj.academic_title }}</strong>
+                </div>
+                {% endif %}
+                {% if profile_obj.entry_term_display %}
+                <div class="dashboard-profile__fact">
+                    <span class="metric__label">Eintritt</span>
+                    <strong>{{ profile_obj.entry_term_display }}</strong>
+                </div>
+                {% endif %}
+                {% if profile_obj.exit_term_display %}
+                <div class="dashboard-profile__fact">
+                    <span class="metric__label">Austritt</span>
+                    <strong>{{ profile_obj.exit_term_display }}</strong>
+                </div>
+                {% endif %}
+                {% if show_birth_date %}
+                <div class="dashboard-profile__fact">
+                    <span class="metric__label">Geburtsdatum</span>
+                    <strong>{% if profile_obj.birth_date %}{{ profile_obj.birth_date|date:"d.m.Y" }}{% else %}Noch nicht hinterlegt{% endif %}</strong>
+                </div>
+                {% endif %}
+                {% if profile_roles %}
+                <div class="dashboard-profile__fact dashboard-profile__fact--full">
+                    <span class="metric__label">Ämter und Funktionen</span>
+                    <strong>{{ profile_roles|join:", " }}</strong>
+                </div>
+                {% endif %}
+            </div>
+            {% if profile_completion.percent < 100 %}
+            <p class="dashboard-profile__note">Einige Profilangaben sind noch nicht hinterlegt.</p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+{% if admin_metrics %}
+<section class="panel">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Administration</p>
+            <h2>Systemübersicht</h2>
+        </div>
+    </div>
+    <div class="hero-card__meta hero-card__meta--compact">
+        {% for metric in admin_metrics %}
+        <div class="metric metric--compact">
+            <span class="metric__label">{{ metric.label }}</span>
+            <strong>{{ metric.value }}</strong>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="two-column dashboard-grid">
+    <section class="panel">
+        <div class="panel__header panel__header--compact">
+            <div>
+                <p class="section-kicker">Demnächst</p>
+                <h2>Kommende Anlässe</h2>
+            </div>
+            {% if request.user.profile.can_manage_events %}
+            <a href="{% url 'event-list' %}" class="button button--ghost">Verwalten</a>
+            {% endif %}
+        </div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Titel</th>
+                        <th>Start</th>
+                        <th>Ort</th>
+                        <th>API</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in next_events %}
+                    <tr>
+                        <td>{{ event.title }}</td>
+                        <td>{{ event.start|date:"d.m.Y H:i" }}</td>
+                        <td>{{ event.location|default:"-" }}</td>
+                        <td>{% if event.is_public %}Öffentlich{% else %}Intern{% endif %}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4">Noch keine Anlässe erfasst.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header panel__header--compact">
+            <div>
+                <p class="section-kicker">Zuletzt bewegt</p>
+                <h2>Dokumente</h2>
+            </div>
+            <a href="{% url 'document-hub' %}" class="button button--ghost">Öffnen</a>
+        </div>
+        <div class="stack-list">
+            {% for document in recent_documents %}
+            <article class="stack-list__item">
+                <div>
+                    <h3>{{ document.title }}</h3>
+                    <p>{% if document.folder %}{{ document.folder.path_label }}{% else %}Ohne Ordner{% endif %}</p>
+                </div>
+                <div class="stack-list__meta">
+                    <span>{{ document.uploaded_by.username }}</span>
+                    <small>{{ document.uploaded_at|date:"d.m.Y H:i" }}</small>
+                </div>
+            </article>
+            {% empty %}
+            <p>Noch keine Dokumente vorhanden.</p>
+            {% endfor %}
+        </div>
+    </section>
+</section>
+{% endblock %}

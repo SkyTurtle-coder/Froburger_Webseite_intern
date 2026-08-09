@@ -1,0 +1,33 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Anmelden | AV Froburger Intern</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="login-body">
+    <main class="login-card">
+        <p class="login-card__eyebrow">AV Froburger</p>
+        <h1 class="login-card__title">Anmelden</h1>
+        <form method="post" class="form-stack">
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            <div class="field">
+                <label for="{{ form.username.id_for_label }}">E-Mail oder Vulgo</label>
+                {{ form.username }}
+            </div>
+            <div class="field">
+                <label for="{{ form.password.id_for_label }}">Passwort</label>
+                {{ form.password }}
+            </div>
+            {% if next %}
+            <input type="hidden" name="next" value="{{ next }}">
+            {% endif %}
+            <button type="submit" class="button">Anmelden</button>
+        </form>
+        <p class="login-card__text"><a href="{{ public_site_url }}" class="text-link">Zur Webseite</a></p>
+    </main>
+</body>
+</html>

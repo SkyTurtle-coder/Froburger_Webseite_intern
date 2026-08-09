@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block page_title %}Profil bearbeiten{% endblock %}
+
+{% block content %}
+<section class="profile-editor">
+    <div class="profile-editor__intro">
+        <p class="section-kicker">Profil</p>
+        <h2>Profil bearbeiten</h2>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="form-stack profile-form">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <section class="panel panel--inner">
+            <p class="section-kicker">Persönliche Angaben</p>
+            <div class="profile-form__grid">
+                {% include "partials/form_field.html" with field=form.photo %}
+                {% include "partials/form_field.html" with field=form.first_name %}
+                {% include "partials/form_field.html" with field=form.last_name %}
+                {% include "partials/form_field.html" with field=form.vulgo %}
+            </div>
+        </section>
+        <section class="panel panel--inner">
+            <p class="section-kicker">Studium und Verbindung</p>
+            <div class="profile-form__grid">
+                {% include "partials/form_field.html" with field=form.academic_title %}
+                {% include "partials/form_field.html" with field=form.degree_program %}
+                {% include "partials/form_field.html" with field=form.birth_date %}
+            </div>
+        </section>
+        {% if can_manage_roles %}
+        <section class="panel panel--inner">
+            <p class="section-kicker">Mitgliedschaft</p>
+            <div class="profile-form__grid">
+                {% include "partials/form_field.html" with field=form.entry_year %}
+                {% include "partials/form_field.html" with field=form.entry_semester %}
+                {% include "partials/form_field.html" with field=form.exit_year %}
+                {% include "partials/form_field.html" with field=form.exit_semester %}
+                {% include "partials/form_field.html" with field=form.death_date %}
+                {% include "partials/form_field.html" with field=form.confirm_death_date_effects %}
+            </div>
+        </section>
+        <section class="panel panel--inner">
+            <p class="section-kicker">Rollen</p>
+            <div class="profile-form__grid">
+                {% include "partials/form_field.html" with field=form.roles %}
+            </div>
+        </section>
+        {% endif %}
+        <div class="button-row profile-form__actions">
+            <button type="submit" class="button">Speichern</button>
+            <a href="{% url 'profile-detail' profile_obj.pk %}" class="button button--ghost">Abbrechen</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

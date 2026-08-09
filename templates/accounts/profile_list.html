@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block page_title %}Mitglieder{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Mitglieder</p>
+            <h2>Verwaltung</h2>
+            <p class="panel__lead">{{ profile_count }} Profile, {{ admin_count }} Admin</p>
+        </div>
+        <a href="{% url 'user-create' %}" class="button">Mitglied anlegen</a>
+    </div>
+    <form method="get" class="filter-bar">
+        <div class="field">
+            <label for="id_q">Suche</label>
+            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Name, Vulgo oder Benutzername">
+        </div>
+        <div class="field">
+            <label for="id_role">Rolle</label>
+            <select id="id_role" name="role">
+                <option value="">Alle Rollen</option>
+                {% for role in role_options %}
+                <option value="{{ role.code }}" {% if active_role == role.code %}selected{% endif %}>{{ role }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-bar__actions">
+            <button type="submit" class="button">Filtern</button>
+            <a href="{% url 'profile-list' %}" class="button button--ghost">Zurücksetzen</a>
+        </div>
+    </form>
+    <div class="card-grid">
+        {% for profile in profiles %}
+        <article class="person-card">
+            <div>
+                <h3><a href="{% url 'profile-detail' profile.pk %}" class="text-link">{{ profile.display_name }}</a></h3>
+                <p>{{ profile.user.username }}{% if profile.user.email %} · {{ profile.user.email }}{% endif %}</p>
+            </div>
+            <p>{% for role in profile.roles.all %}{% if not forloop.first %}, {% endif %}{{ role }}{% empty %}Keine Rolle{% endfor %}</p>
+        </article>
+        {% empty %}
+        <p>Keine Profile für die aktuelle Filterkombination gefunden.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

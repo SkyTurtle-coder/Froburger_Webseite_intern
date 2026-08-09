@@ -1,0 +1,146 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ event.title }} | AV Froburger</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+    <main class="public-event-shell">
+        <section class="public-hero public-hero--event">
+            <div class="public-page public-page--event">
+                <div class="public-hero__inner">
+                    <div class="public-hero__content">
+                        <p class="section-kicker">AV Froburger</p>
+                        <h1>{{ event.title }}</h1>
+                        {% if event.short_description %}
+                        <p class="public-hero__intro">{{ event.short_description }}</p>
+                        {% endif %}
+                        <div class="tag-row public-hero__tags">
+                            <span class="tag tag--inverted">{{ event.get_status_display }}</span>
+                            <span class="tag tag--inverted">{{ event.start|date:"d.m.Y H:i" }} bis {{ event.end|date:"d.m.Y H:i" }}</span>
+                            <span class="tag tag--inverted">{{ event.location }}</span>
+                        </div>
+                    </div>
+                    <aside class="public-hero__summary">
+                        <div class="public-summary-card">
+                            <span class="public-summary-card__label">Anlassdatum</span>
+                            <strong>{{ event.start|date:"d.m.Y" }}</strong>
+                        </div>
+                        <div class="public-summary-card">
+                            <span class="public-summary-card__label">Beginn</span>
+                            <strong>{{ event.start|date:"H:i" }}</strong>
+                        </div>
+                        <div class="public-summary-card">
+                            <span class="public-summary-card__label">Ort</span>
+                            <strong>{{ event.location }}</strong>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </section>
+
+        <div class="public-page public-page--event public-page--event-content">
+            {% if messages %}
+            <section class="flash-stack">
+                {% for message in messages %}
+                <div class="flash">{{ message }}</div>
+                {% endfor %}
+            </section>
+            {% endif %}
+
+            <section class="public-layout">
+                <section class="panel panel--public-main">
+                    <div class="panel__header">
+                        <div>
+                            <p class="section-kicker">Anlass</p>
+                            <h2>Beschreibung</h2>
+                        </div>
+                    </div>
+                    <p class="public-copy">{{ event.description|linebreaksbr }}</p>
+                </section>
+
+                <aside class="panel panel--accent panel--public-side">
+                    <div class="panel__header">
+                        <div>
+                            <p class="section-kicker">Teilnahme</p>
+                            <h2>Einschreiben</h2>
+                        </div>
+                    </div>
+                    <div class="detail-list">
+                        <div class="detail-list__item">
+                            <dt>Anmeldeschluss</dt>
+                            <dd>{{ event.signup_deadline|date:"d.m.Y H:i" }}</dd>
+                        </div>
+                        <div class="detail-list__item">
+                            <dt>Status</dt>
+                            <dd>{% if event.is_signup_closed %}geschlossen{% else %}offen{% endif %}</dd>
+                        </div>
+                    </div>
+                    {% if event.is_signup_closed %}
+                    <p class="panel__lead">Die Einschreibung ist geschlossen. Die bisher eingetragenen Personen bleiben unten sichtbar.</p>
+                    {% else %}
+                    <form method="post" class="form-stack public-signup-form" novalidate>
+                        {% csrf_token %}
+                        {% include "partials/form_fields.html" with form=signup_form %}
+                        <button type="submit" class="button">Eintragen</button>
+                    </form>
+                    {% endif %}
+                </aside>
+            </section>
+
+            <section class="panel panel--public-table">
+                <div class="panel__header">
+                    <div>
+                        <p class="section-kicker">Anmeldeliste</p>
+                        <h2>Bereits eingetragen</h2>
+                        <p class="panel__lead">Jedes Vulgo kann pro Anlass nur einmal vorkommen.</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="table table--public">
+                        <thead>
+                            <tr>
+                                <th scope="col">Vulgo</th>
+                                <th scope="col">Anwesend</th>
+                                {% for column in signup_columns %}
+                                <th scope="col">{{ column.label }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in signup_rows %}
+                            <tr>
+                                <td>{{ row.signup.vulgo }}</td>
+                                <td>{% if row.signup.attending %}Ja{% else %}Nein{% endif %}</td>
+                                {% for value in row.extra_values %}
+                                <td>{{ value }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="{{ signup_columns|length|add:2 }}">Noch keine Einschreibungen vorhanden.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            {% if wordpress_fallback_url %}
+            <section class="panel panel--narrow panel--public-link">
+                <div class="panel__header">
+                    <div>
+                        <p class="section-kicker">Webseite</p>
+                        <h2>Öffentliche Seite</h2>
+                    </div>
+                </div>
+                <p><a href="{{ wordpress_fallback_url }}" class="text-link">Zur Webseite</a></p>
+            </section>
+            {% endif %}
+        </div>
+    </main>
+</body>
+</html>

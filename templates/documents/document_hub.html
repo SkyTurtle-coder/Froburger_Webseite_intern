@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dokumente{% endblock %}
+
+{% block content %}
+<section class="card-grid card-grid--documents">
+    <article class="scope-card">
+        <p class="section-kicker">Allgemein</p>
+        <h2>Allgemeine Dokumente</h2>
+        <p class="scope-card__meta">{{ general_documents_count }} Dateien</p>
+        <a href="{% url 'document-scope' 'general' %}" class="button">Öffnen</a>
+    </article>
+
+    {% if sensitive_documents_count is not None %}
+    <article class="scope-card scope-card--accent">
+        <p class="section-kicker">Geschützt</p>
+        <h2>Sensible Dokumente</h2>
+        <p class="scope-card__meta">{{ sensitive_documents_count }} Dateien</p>
+        <a href="{% url 'document-scope' 'sensitive' %}" class="button">Öffnen</a>
+    </article>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Zuletzt hochgeladen</p>
+            <h2>Aktuelle Dateien</h2>
+        </div>
+    </div>
+    <div class="stack-list">
+        {% for document in recent_documents %}
+        <article class="stack-list__item">
+            <div>
+                <h3>{{ document.title }}</h3>
+                <p>{% if document.folder %}{{ document.folder.path_label }}{% else %}Ohne Ordner{% endif %}</p>
+            </div>
+            <div class="stack-list__meta">
+                <span>{{ document.uploaded_by.username }}</span>
+                <small>{{ document.uploaded_at|date:"d.m.Y H:i" }}</small>
+            </div>
+        </article>
+        {% empty %}
+        <p>Es wurden noch keine Dokumente hochgeladen.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

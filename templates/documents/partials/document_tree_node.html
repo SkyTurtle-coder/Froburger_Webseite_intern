@@ -1,0 +1,37 @@
+<details class="document-node" {% if node.is_open %}open{% endif %} data-document-folder>
+    <summary class="document-node__summary" aria-expanded="{% if node.is_open %}true{% else %}false{% endif %}">
+        <span class="document-node__row">
+            <span class="document-node__main">
+                <span class="document-node__state" aria-hidden="true"></span>
+                <span class="document-icon document-icon--folder" aria-hidden="true"></span>
+                <span class="document-node__copy">
+                    <span class="document-node__title">{{ node.folder.name }}</span>
+                </span>
+            </span>
+            <span class="document-node__meta">
+                {% if node.total_items == 0 %}
+                Leer
+                {% elif node.total_items == 1 %}
+                1 Element
+                {% else %}
+                {{ node.total_items }} Elemente
+                {% endif %}
+            </span>
+        </span>
+    </summary>
+    <div class="document-node__children" role="group">
+        {% for child in node.child_folders %}
+            {% include "documents/partials/document_tree_node.html" with node=child %}
+        {% endfor %}
+
+        {% for document in node.documents %}
+            {% include "documents/partials/document_tree_document.html" with document=document %}
+        {% endfor %}
+
+        {% if not node.child_folders and not node.documents %}
+        <div class="document-node__empty">
+            Dieser Ordner enthält noch keine Dokumente oder Unterordner.
+        </div>
+        {% endif %}
+    </div>
+</details>

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block page_title %}Totentafel{% endblock %}
+
+{% block content %}
+<section class="avf-memorial-page panel panel--public-table">
+    <div class="avf-memorial-header panel__header panel__header--compact">
+        <div class="avf-memorial-intro">
+            <p class="section-kicker avf-memorial-kicker">Erinnerung</p>
+            <p class="avf-memorial-lead">Menschen treten in unser Leben und begleiten uns eine Weile. Einige bleiben für immer, denn sie hinterlassen ihre Spuren in unseren Herzen.</p>
+        </div>
+        {% if can_manage_memorial_entries %}
+        <div class="avf-memorial-toolbar">
+            <a href="{% url 'memorial-create' %}" class="button button--ghost avf-memorial-action avf-memorial-action--primary">Neu erfassen</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="table-wrap avf-memorial-table-wrap">
+        <table class="table table--public avf-memorial-table">
+            <thead>
+                <tr>
+                    <th scope="col">Für immer bleibend</th>
+                    <th scope="col">Geboren</th>
+                    <th scope="col">Gestorben</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in memorial_entries %}
+                <tr class="avf-memorial-row">
+                    <td class="avf-memorial-cell avf-memorial-cell--person">
+                        <div class="avf-memorial-person">
+                            <span class="avf-memorial-name">{{ entry.display_name_with_markers }}</span>
+                            {% if entry.obituary_document_id or can_manage_memorial_entries %}
+                            <span class="avf-memorial-actions">
+                                {% if entry.obituary_document_id %}
+                                <a href="{% url 'document-preview' entry.obituary_document_id %}" class="button button--ghost avf-memorial-action">Nachruf öffnen</a>
+                                <a href="{% url 'document-download' entry.obituary_document_id %}" class="button button--ghost avf-memorial-action">Herunterladen</a>
+                                {% endif %}
+                                {% if can_manage_memorial_entries %}
+                                <a href="{% url 'memorial-edit' entry.pk %}" class="button button--ghost avf-memorial-action">Bearbeiten</a>
+                                <form method="post" action="{% url 'memorial-delete' entry.pk %}" class="avf-memorial-inline-form">
+                                    {% csrf_token %}
+                                    <button type="submit" class="button button--ghost avf-memorial-action">Löschen</button>
+                                </form>
+                                {% endif %}
+                            </span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="avf-memorial-cell avf-memorial-date">{{ entry.birth_display|default:"-" }}</td>
+                    <td class="avf-memorial-cell avf-memorial-date">{{ entry.death_display|default:"-" }}</td>
+                </tr>
+                {% empty %}
+                <tr class="avf-memorial-row">
+                    <td colspan="3" class="avf-memorial-empty">Noch keine veröffentlichten Einträge vorhanden.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if memorial_entries %}
+    <p class="avf-memorial-footnote">* Ehrenphilister</p>
+    {% endif %}
+</section>
+{% endblock %}

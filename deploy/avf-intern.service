@@ -1,0 +1,18 @@
+[Unit]
+Description=AV Froburger Intern Django (Uvicorn)
+After=network.target mariadb.service
+Wants=network.target
+
+[Service]
+User=avfapp
+Group=avfapp
+WorkingDirectory=/srv/avf-intern/app
+EnvironmentFile=/etc/avf-intern/avf-intern.env
+ExecStart=/srv/avf-intern/venv/bin/uvicorn config.asgi:application --host 127.0.0.1 --port 8010
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

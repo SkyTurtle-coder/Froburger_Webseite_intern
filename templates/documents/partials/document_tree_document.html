@@ -1,0 +1,65 @@
+<article class="document-entry" role="treeitem">
+    <div class="document-entry__row">
+        <div class="document-entry__main">
+            <span class="document-icon document-icon--{{ document.file_icon }}" aria-hidden="true"></span>
+            <div class="document-entry__copy">
+                <h4 class="document-entry__title">{{ document.title }}</h4>
+                <p class="document-entry__meta">
+                    {% if document.description %}
+                    {{ document.description }}
+                    {% else %}
+                    {{ document.file_name }}
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <div class="document-entry__details">
+            <span>Stand {{ document.uploaded_at|date:"d.m.Y H:i" }}</span>
+            <span>Von {{ document.uploaded_by.username }}</span>
+        </div>
+        <div class="document-entry__actions">
+            {% if document.can_view and document.is_pdf %}
+            <a
+                href="{% url 'document-preview' document.pk %}"
+                class="button document-action document-action--primary"
+                aria-label="Dokument {{ document.title }} ansehen"
+                data-document-preview
+                data-document-title="{{ document.title }}"
+                data-document-download-url="{% url 'document-download' document.pk %}"
+            >
+                Ansehen
+            </a>
+            {% endif %}
+            {% if document.can_download %}
+            <a
+                href="{% url 'document-download' document.pk %}"
+                class="button button--ghost document-action document-action--secondary"
+                aria-label="Dokument {{ document.title }} herunterladen"
+            >
+                Herunterladen
+            </a>
+            {% endif %}
+            {% if document.can_edit %}
+            <a
+                href="{% url 'document-edit' document.pk %}"
+                class="button button--ghost document-action document-action--secondary"
+                aria-label="Dokument {{ document.title }} bearbeiten"
+            >
+                Bearbeiten
+            </a>
+            {% endif %}
+            {% if document.can_delete %}
+            <button
+                type="button"
+                class="button button--danger document-action"
+                aria-label="Dokument {{ document.title }} löschen"
+                data-document-delete
+                data-document-delete-url="{% url 'document-delete' document.pk %}"
+                data-document-title="{{ document.title }}"
+            >
+                Löschen
+            </button>
+            {% endif %}
+        </div>
+    </div>
+</article>

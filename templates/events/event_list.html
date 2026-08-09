@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block page_title %}Anlässe{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Anlässe</p>
+            <p class="panel__lead">{{ total_events_count }} Einträge, {{ upcoming_events_count }} kommend, {{ past_events_count }} vergangen.</p>
+        </div>
+        <a href="{% url 'event-create' %}" class="button">Neuen Anlass erfassen</a>
+    </div>
+    <form method="get" class="filter-bar filter-bar--wide">
+        <div class="field">
+            <label for="id_q">Suche</label>
+            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Titel, Slug, Kurztext oder Ort">
+        </div>
+        <div class="field">
+            <label for="id_visibility">Sichtbarkeit</label>
+            <select id="id_visibility" name="visibility">
+                <option value="">Alle</option>
+                <option value="public" {% if active_visibility == "public" %}selected{% endif %}>Öffentlich</option>
+                <option value="internal" {% if active_visibility == "internal" %}selected{% endif %}>Nur intern</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="id_timing">Zeitfenster</label>
+            <select id="id_timing" name="timing">
+                <option value="">Alle</option>
+                <option value="upcoming" {% if active_timing == "upcoming" %}selected{% endif %}>Kommend</option>
+                <option value="past" {% if active_timing == "past" %}selected{% endif %}>Vergangen</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="id_status">Status</label>
+            <select id="id_status" name="status">
+                <option value="">Alle</option>
+                {% for value, label in status_options %}
+                <option value="{{ value }}" {% if active_status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-bar__actions">
+            <button type="submit" class="button">Filtern</button>
+            <a href="{% url 'event-list' %}" class="button button--ghost">Zurücksetzen</a>
+        </div>
+    </form>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Titel</th>
+                    <th>Slug</th>
+                    <th>Start</th>
+                    <th>Ende</th>
+                    <th>Ort</th>
+                    <th>Status</th>
+                    <th>Öffentlich</th>
+                    <th>Startseite</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in events %}
+                <tr>
+                    <td>{{ event.title }}</td>
+                    <td>{{ event.slug }}</td>
+                    <td>{{ event.start|date:"d.m.Y H:i" }}</td>
+                    <td>{{ event.end|date:"d.m.Y H:i" }}</td>
+                    <td>{{ event.location|default:"-" }}</td>
+                    <td>{{ event.get_status_display }}</td>
+                    <td>
+                        {% if event.is_public %}
+                        <span class="tag">Ja</span>
+                        {% else %}
+                        <span class="tag tag--muted">Nein</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if event.show_on_homepage %}
+                        <span class="tag">Ja</span>
+                        {% else %}
+                        <span class="tag tag--muted">Nein</span>
+                        {% endif %}
+                    </td>
+                    <td class="actions-cell">
+                        <a href="{% url 'event-edit' event.pk %}" class="text-link">Bearbeiten</a>
+                        <a href="{% url 'event-delete' event.pk %}" class="text-link danger-link">Löschen</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="9">Noch keine Anlässe vorhanden.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

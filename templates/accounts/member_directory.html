@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block page_title %}Mitgliederliste{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Mitglieder</p>
+            <p class="panel__lead">{{ profile_count }} Mitglieder</p>
+        </div>
+    </div>
+
+    <form method="get" class="filter-bar filter-bar--members">
+        <div class="field">
+            <label for="id_q">Suche</label>
+            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Name, v/o oder Benutzername">
+        </div>
+        <input type="hidden" name="sort" value="{{ active_sort }}">
+        <input type="hidden" name="direction" value="{{ active_direction }}">
+        <div class="filter-bar__actions">
+            <button type="submit" class="button">Filtern</button>
+            {% if active_query %}
+            <a href="{% url 'member-directory' %}" class="button button--ghost">Zurücksetzen</a>
+            {% endif %}
+        </div>
+    </form>
+
+    <div class="table-wrap table-wrap--members">
+        <table class="table table--members">
+            <thead>
+                <tr>
+                    <th aria-sort="{{ sort_state.name.aria_sort }}">
+                        <a
+                            href="?sort=name&direction={{ sort_state.name.next_direction }}{% if active_query %}&q={{ active_query|urlencode }}{% endif %}"
+                            class="sort-link {% if active_sort == 'name' %}sort-link--active{% endif %}"
+                        >
+                            <span>Name</span>
+                            <span class="sort-link__icon" aria-hidden="true">{{ sort_state.name.symbol }}</span>
+                        </a>
+                    </th>
+                    <th aria-sort="{{ sort_state.vulgo.aria_sort }}">
+                        <a
+                            href="?sort=vulgo&direction={{ sort_state.vulgo.next_direction }}{% if active_query %}&q={{ active_query|urlencode }}{% endif %}"
+                            class="sort-link {% if active_sort == 'vulgo' %}sort-link--active{% endif %}"
+                        >
+                            <span>v/o</span>
+                            <span class="sort-link__icon" aria-hidden="true">{{ sort_state.vulgo.symbol }}</span>
+                        </a>
+                    </th>
+                    <th>Benutzername</th>
+                    <th>Rollen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for profile in profiles %}
+                <tr>
+                    <td data-label="Name">
+                        {% if request.user.profile.pk == profile.pk or request.user.profile.can_manage_roles %}
+                        <a href="{% url 'profile-detail' profile.pk %}" class="text-link">{{ profile.first_name }} {{ profile.last_name }}</a>
+                        {% else %}
+                        {{ profile.first_name }} {{ profile.last_name }}
+                        {% endif %}
+                    </td>
+                    <td data-label="v/o">{{ profile.vulgo|default:"-" }}</td>
+                    <td data-label="Benutzername">{{ profile.user.username }}</td>
+                    <td data-label="Rollen">{% for role in profile.roles.all %}{% if not forloop.first %}, {% endif %}{{ role }}{% empty %}-{% endfor %}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4">Keine Mitglieder für die aktuelle Suche gefunden.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

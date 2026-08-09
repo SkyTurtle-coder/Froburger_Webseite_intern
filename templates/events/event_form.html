@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block page_title %}Anlass bearbeiten{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Anlässe</p>
+            <h2>{% if object %}Anlass bearbeiten{% else %}Anlass anlegen{% endif %}</h2>
+        </div>
+        <a href="{% url 'event-list' %}" class="button button--ghost">Zurück</a>
+    </div>
+    <form method="post" class="form-stack">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" with form=form %}
+        <section class="panel panel--inner">
+            <div class="panel__header">
+                <div>
+                    <p class="section-kicker">Anmeldetabelle</p>
+                    <h3>Zusatzspalten</h3>
+                    <p class="panel__lead">Vulgo und Anwesend sind immer vorhanden.</p>
+                </div>
+                <button type="button" class="button button--ghost" id="add-signup-column">+ Zusatzspalte</button>
+            </div>
+            {{ column_formset.management_form }}
+            {% if column_formset.non_form_errors %}
+            <div class="flash">{{ column_formset.non_form_errors }}</div>
+            {% endif %}
+            <div class="stack-list" id="signup-column-list">
+                {% for column_form in column_formset %}
+                <article class="stack-list__item stack-list__item--form signup-column-card" data-column-form>
+                    <div class="two-column two-column--compact">
+                        {% for hidden in column_form.hidden_fields %}
+                            {% if hidden.name == "DELETE" %}
+                            <div class="signup-column-card__delete-flag">{{ hidden }}</div>
+                            {% else %}
+                            {{ hidden }}
+                            {% endif %}
+                        {% endfor %}
+                        {% for field in column_form.visible_fields %}
+                            {% if field.name != "DELETE" %}
+                            <div class="field {% if field.errors %}field--error{% endif %}">
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                                {% if field.help_text %}
+                                <small>{{ field.help_text }}</small>
+                                {% endif %}
+                                {{ field.errors }}
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div class="signup-column-card__actions">
+                        <button type="button" class="button button--ghost signup-column-remove" data-remove-column>Entfernen</button>
+                    </div>
+                </article>
+                {% empty %}
+                <p class="panel__lead signup-column-empty" id="signup-column-empty">Noch keine Zusatzspalten angelegt.</p>
+                {% endfor %}
+            </div>
+            <template id="signup-column-template">
+                <article class="stack-list__item stack-list__item--form signup-column-card" data-column-form>
+                    <div class="two-column two-column--compact">
+                        {% for hidden in column_formset.empty_form.hidden_fields %}
+                            {% if hidden.name == "DELETE" %}
+                            <div class="signup-column-card__delete-flag">{{ hidden }}</div>
+                            {% else %}
+                            {{ hidden }}
+                            {% endif %}
+                        {% endfor %}
+                        {% for field in column_formset.empty_form.visible_fields %}
+                            {% if field.name != "DELETE" %}
+                            <div class="field">
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                                {% if field.help_text %}
+                                <small>{{ field.help_text }}</small>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    <div class="signup-column-card__actions">
+                        <button type="button" class="button button--ghost signup-column-remove" data-remove-column>Entfernen</button>
+                    </div>
+                </article>
+            </template>
+        </section>
+        <div class="button-row">
+            <button type="submit" class="button">Speichern</button>
+            <a href="{% url 'event-list' %}" class="button button--ghost">Abbrechen</a>
+        </div>
+    </form>
+</section>
+
+{% if object %}
+<section class="panel">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Anmeldungen</p>
+            <h2>Bestehende Einträge</h2>
+            <p class="panel__lead">{{ signup_count }} Einträge für diesen Anlass.</p>
+        </div>
+    </div>
+    {% if managed_signup_forms %}
+    <form method="post" class="form-stack">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="manage-signups">
+        <div class="stack-list">
+            {% for signup_form in managed_signup_forms %}
+            <article class="stack-list__item stack-list__item--form">
+                <div class="stack-list__form">
+                    {% for hidden in signup_form.hidden_fields %}{{ hidden }}{% endfor %}
+                    {{ signup_form.non_field_errors }}
+                    <div class="two-column two-column--compact">
+                        {% for field in signup_form.visible_fields %}
+                        <div class="field {% if field.errors %}field--error{% endif %}">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {{ field.errors }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        <button type="submit" class="button">Einschreibungen speichern</button>
+    </form>
+    {% else %}
+    <p class="panel__lead">Noch keine Einschreibungen vorhanden.</p>
+    {% endif %}
+</section>
+{% endif %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const addButton = document.getElementById("add-signup-column");
+    const list = document.getElementById("signup-column-list");
+    const template = document.getElementById("signup-column-template");
+    const totalFormsInput = document.getElementById("id_columns-TOTAL_FORMS");
+    const emptyState = document.getElementById("signup-column-empty");
+
+    if (!addButton || !list || !template || !totalFormsInput) {
+        return;
+    }
+
+    const toggleEmptyState = function () {
+        const visibleCards = list.querySelectorAll("[data-column-form]:not([hidden])").length;
+        if (emptyState) {
+            emptyState.hidden = visibleCards > 0;
+        }
+    };
+
+    const attachRemoveHandler = function (card) {
+        const removeButton = card.querySelector("[data-remove-column]");
+        if (!removeButton) {
+            return;
+        }
+
+        removeButton.addEventListener("click", function () {
+            const deleteField = card.querySelector('input[name$="-DELETE"]');
+            const idField = card.querySelector('input[name$="-id"]');
+            const hasPersistedValue = idField && idField.value;
+
+            if (deleteField && hasPersistedValue) {
+                deleteField.checked = true;
+                card.hidden = true;
+                toggleEmptyState();
+                return;
+            }
+
+            card.remove();
+            toggleEmptyState();
+        });
+    };
+
+    list.querySelectorAll("[data-column-form]").forEach(attachRemoveHandler);
+    toggleEmptyState();
+
+    addButton.addEventListener("click", function () {
+        const formIndex = Number(totalFormsInput.value);
+        const fragment = template.innerHTML.replaceAll("__prefix__", String(formIndex));
+        list.insertAdjacentHTML("beforeend", fragment);
+        totalFormsInput.value = String(formIndex + 1);
+        attachRemoveHandler(list.lastElementChild);
+        toggleEmptyState();
+    });
+});
+</script>
+{% endblock %}

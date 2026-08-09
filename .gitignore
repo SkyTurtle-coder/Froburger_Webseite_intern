@@ -1,0 +1,38 @@
+# Secrets & environment
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Database
+*.sqlite3
+*.sql
+
+# Media / uploaded member data (documents, photos, obituaries)
+/media/
+/staticfiles/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Local QA/audit artifacts (screenshots, dumps, scratch files from manual debugging sessions)
+/audit-*.png
+/rebuild-*.png
+/tmp-*.png
+/tmp-*.json
+/post-*.json
+/post-*.sql
+/*-live*.html
+/*-frontend*.html
+/*-builder-*.html
+/ueber-uns-*.html
+/mitglieder-live*.html
+/kontakt-live.html
+/data/
+
+# OS/editor
+.DS_Store
+Thumbs.db

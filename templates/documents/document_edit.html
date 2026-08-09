@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dokument bearbeiten{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Dokumente</p>
+            <h2>Dokument bearbeiten</h2>
+            <p class="panel__lead">{{ document.title }}</p>
+        </div>
+    </div>
+
+    <form method="post" class="form-stack">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" with form=form %}
+        <div class="button-row">
+            <button type="submit" class="button">Speichern</button>
+            <a href="{% url 'document-scope' document.visibility|lower %}" class="button button--ghost">Abbrechen</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

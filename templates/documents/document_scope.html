@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ scope_label }}{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Dokumente</p>
+            <h2>{{ scope_label }}</h2>
+            <p class="panel__lead">{{ document_count }} Dokumente in {{ folder_count }} Ordnern.</p>
+        </div>
+    </div>
+
+    <form method="get" class="filter-bar filter-bar--documents">
+        <div class="field">
+            <label for="id_q">Suche</label>
+            <input
+                id="id_q"
+                type="search"
+                name="q"
+                value="{{ active_query }}"
+                placeholder="Titel, Beschreibung oder Ordner"
+                data-document-search
+            >
+        </div>
+        <div class="filter-bar__actions">
+            <button type="submit" class="button">Filtern</button>
+            {% if active_query %}
+            <a href="{% url 'document-scope' scope|lower %}" class="button button--ghost">Zurücksetzen</a>
+            {% endif %}
+        </div>
+    </form>
+
+    <section class="document-browser" data-document-tree>
+        <div class="document-browser__header">
+            <div>
+                <h3>Dokumente und Ordner</h3>
+            </div>
+            <p class="document-browser__summary">{{ document_count }} Dokumente · {{ folder_count }} Ordner</p>
+        </div>
+
+        {% if document_tree.is_empty %}
+        <div class="empty-state">
+            {% if active_query %}
+            <h3>Keine passenden Ordner oder Dokumente gefunden.</h3>
+            {% else %}
+            <h3>Noch keine Ordner oder Dokumente vorhanden.</h3>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="document-tree" role="tree">
+            {% for node in document_tree.root_folders %}
+                {% include "documents/partials/document_tree_node.html" with node=node %}
+            {% endfor %}
+
+            {% for document in document_tree.root_documents %}
+                {% include "documents/partials/document_tree_document.html" with document=document %}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+</section>
+
+<dialog class="document-viewer" data-document-viewer aria-labelledby="document-viewer-title">
+    <div class="document-viewer__shell">
+        <div class="document-viewer__header">
+            <div class="document-viewer__headline">
+                <p class="section-kicker">Vorschau</p>
+                <h3 id="document-viewer-title">Dokument</h3>
+            </div>
+            <div class="document-viewer__actions">
+                <a href="#" class="button button--ghost document-viewer__download" data-viewer-download>Herunterladen</a>
+                <button type="button" class="button" data-viewer-close>Schließen</button>
+            </div>
+        </div>
+        <div class="document-viewer__body">
+            <iframe
+                title="PDF-Vorschau"
+                class="document-viewer__frame"
+                data-viewer-frame
+                loading="lazy"
+            ></iframe>
+        </div>
+    </div>
+</dialog>
+
+<dialog class="document-delete-dialog" data-document-delete-dialog aria-labelledby="document-delete-title">
+    <form method="post" class="document-delete-dialog__form" data-document-delete-form>
+        {% csrf_token %}
+        <div class="document-delete-dialog__header">
+            <p class="section-kicker">Löschen</p>
+            <h3 id="document-delete-title">Dokument endgültig löschen</h3>
+        </div>
+        <p class="document-delete-dialog__copy" data-document-delete-copy>
+            Soll das Dokument endgültig gelöscht werden?
+        </p>
+        <div class="document-delete-dialog__actions">
+            <button type="button" class="button button--ghost" data-document-delete-cancel>Abbrechen</button>
+            <button type="submit" class="button button--danger">Endgültig löschen</button>
+        </div>
+    </form>
+</dialog>
+
+{% if upload_allowed %}
+<section class="two-column two-column--documents">
+    <section class="panel panel--inner">
+        <div class="panel__header panel__header--compact">
+            <div>
+                <p class="section-kicker">Ordner</p>
+                <h2>Neuen Ordner erstellen</h2>
+            </div>
+        </div>
+        <form method="post" class="form-stack form-stack--split">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create-folder">
+            {% include "partials/form_fields.html" with form=folder_form %}
+            <button type="submit" class="button">Ordner speichern</button>
+        </form>
+    </section>
+
+    <section class="panel panel--inner">
+        <div class="panel__header panel__header--compact">
+            <div>
+                <p class="section-kicker">Upload</p>
+                <h2>Dokument hochladen</h2>
+            </div>
+        </div>
+        <form method="post" enctype="multipart/form-data" class="form-stack form-stack--split">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="upload-document">
+            {% include "partials/form_fields.html" with form=document_form %}
+            <button type="submit" class="button">Dokument speichern</button>
+        </form>
+    </section>
+</section>
+{% endif %}
+{% endblock %}

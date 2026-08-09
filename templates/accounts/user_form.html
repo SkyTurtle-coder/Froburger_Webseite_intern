@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block page_title %}Benutzer anlegen{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Mitglieder</p>
+            <h2>Mitglied anlegen</h2>
+        </div>
+        <a href="{% url 'profile-list' %}" class="button button--ghost">Zurück</a>
+    </div>
+    <form method="post" enctype="multipart/form-data" class="form-stack">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" with form=form %}
+        <div class="button-row">
+            <button type="submit" class="button">Speichern</button>
+            <a href="{% url 'profile-list' %}" class="button button--ghost">Abbrechen</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

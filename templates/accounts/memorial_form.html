@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<section class="profile-editor avf-memorial-form-page">
+    <div class="profile-editor__intro avf-memorial-form-intro">
+        <p class="section-kicker avf-memorial-kicker">Totentafel</p>
+        <h2 class="avf-memorial-form-title">{{ page_title }}</h2>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="form-stack profile-form avf-memorial-form">
+        {% csrf_token %}
+        <section class="panel panel--inner avf-memorial-form-panel">
+            <div class="profile-form__grid avf-memorial-form-grid">
+                {% include "partials/form_field.html" with field=form.member_profile %}
+                {% include "partials/form_field.html" with field=form.display_name %}
+                {% include "partials/form_field.html" with field=form.birth_date %}
+                {% include "partials/form_field.html" with field=form.death_date %}
+                {% include "partials/form_field.html" with field=form.is_honorary_member %}
+                {% include "partials/form_field.html" with field=form.obituary_upload %}
+                {% if existing_obituary_document %}
+                <div class="field avf-memorial-existing-document">
+                    <span class="field__label">Vorhandener Nachruf</span>
+                    <div class="button-row avf-memorial-actions avf-memorial-actions--form">
+                        <a href="{% url 'document-preview' existing_obituary_document.pk %}" class="button button--ghost avf-memorial-action">Öffnen</a>
+                        <a href="{% url 'document-download' existing_obituary_document.pk %}" class="button button--ghost avf-memorial-action">Herunterladen</a>
+                    </div>
+                </div>
+                {% endif %}
+                {% include "partials/form_field.html" with field=form.obituary_remove %}
+            </div>
+        </section>
+
+        <div class="button-row profile-form__actions avf-memorial-form-actions">
+            <button type="submit" class="button avf-memorial-submit">{{ submit_label }}</button>
+            <a href="{% url 'memorial-page' %}" class="button button--ghost avf-memorial-action">Abbrechen</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

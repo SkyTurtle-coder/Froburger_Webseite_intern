@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block page_title %}Anlass löschen{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Anlässe</p>
+            <h2>{{ object.title }} löschen</h2>
+        </div>
+    </div>
+    <p>Dieser Anlass wird dauerhaft entfernt.</p>
+    <form method="post" class="button-row">
+        {% csrf_token %}
+        <button type="submit" class="button button--danger">Löschen</button>
+        <a href="{% url 'event-list' %}" class="button button--ghost">Abbrechen</a>
+    </form>
+</section>
+{% endblock %}

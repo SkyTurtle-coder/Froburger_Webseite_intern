@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block page_title %}Profil{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="profile-layout">
+        <div class="avatar-card">
+            {% if profile_obj.photo %}
+            <img src="{% url 'profile-photo' profile_obj.pk %}" alt="{{ profile_obj.display_name }}" class="avatar-card__image">
+            {% else %}
+            <div class="avatar-card__placeholder">{{ profile_obj.first_name|slice:":1" }}{{ profile_obj.last_name|slice:":1" }}</div>
+            {% endif %}
+        </div>
+        <div class="detail-layout">
+            <dl class="detail-list">
+                <div class="detail-list__item">
+                    <dt>Anzeigename</dt>
+                    <dd>{{ profile_obj.display_name }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>Benutzername</dt>
+                    <dd>{{ profile_obj.user.username }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>E-Mail</dt>
+                    <dd>{{ profile_obj.user.email|default:"-" }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>Vorname</dt>
+                    <dd>{{ profile_obj.first_name }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>Name</dt>
+                    <dd>{{ profile_obj.last_name }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>v/o</dt>
+                    <dd>{{ profile_obj.vulgo|default:"-" }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>Abschluss / Titel</dt>
+                    <dd>{{ profile_obj.academic_title|default:"Noch nicht hinterlegt" }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>Studiengang</dt>
+                    <dd>{{ profile_obj.degree_program|default:"Noch nicht hinterlegt" }}</dd>
+                </div>
+                <div class="detail-list__item">
+                    <dt>Mitgliedsstatus</dt>
+                    <dd>{{ membership_status_label }}</dd>
+                </div>
+                {% if profile_obj.entry_term_display %}
+                <div class="detail-list__item">
+                    <dt>Eintritt</dt>
+                    <dd>{{ profile_obj.entry_term_display }}</dd>
+                </div>
+                {% endif %}
+                {% if profile_obj.exit_term_display %}
+                <div class="detail-list__item">
+                    <dt>Austritt</dt>
+                    <dd>{{ profile_obj.exit_term_display }}</dd>
+                </div>
+                {% endif %}
+                {% if profile_obj.membership_period_display %}
+                <div class="detail-list__item">
+                    <dt>Mitgliedschaft</dt>
+                    <dd>{{ profile_obj.membership_period_display }}</dd>
+                </div>
+                {% endif %}
+                {% if show_birth_date %}
+                <div class="detail-list__item">
+                    <dt>Geburtsdatum</dt>
+                    <dd>{% if profile_obj.birth_date %}{{ profile_obj.birth_date|date:"d.m.Y" }}{% else %}Noch nicht hinterlegt{% endif %}</dd>
+                </div>
+                {% endif %}
+                {% if show_death_date %}
+                <div class="detail-list__item">
+                    <dt>Todesdatum</dt>
+                    <dd>{% if profile_obj.death_date %}{{ profile_obj.death_date|date:"d.m.Y" }}{% else %}-{% endif %}</dd>
+                </div>
+                {% endif %}
+                <div class="detail-list__item">
+                    <dt>Rollen</dt>
+                    <dd>{% for role in profile_roles %}{% if not forloop.first %}, {% endif %}{{ role }}{% empty %}Keine Rolle{% endfor %}</dd>
+                </div>
+            </dl>
+
+            <section class="info-panel">
+                <p class="section-kicker">Berechtigungen</p>
+                <div class="info-panel__row">
+                    <span>Anlässe verwalten</span>
+                    <strong>{% if can_manage_events %}Ja{% else %}Nein{% endif %}</strong>
+                </div>
+                <div class="info-panel__row">
+                    <span>Sensible Dokumente</span>
+                    <strong>{% if can_access_sensitive_documents %}Ja{% else %}Nein{% endif %}</strong>
+                </div>
+            </section>
+
+            {% if is_own_profile %}
+            <section class="info-panel">
+                <p class="section-kicker">Profilvollständigkeit</p>
+                <div class="info-panel__row">
+                    <span>Pflegbare Angaben</span>
+                    <strong>{{ profile_completion.completed }} / {{ profile_completion.total }}</strong>
+                </div>
+                <div class="progress-meter" aria-label="Profilvollständigkeit">
+                    <span class="progress-meter__bar" style="width: {{ profile_completion.percent }}%;"></span>
+                </div>
+            </section>
+            {% endif %}
+
+            <div class="button-row">
+                {% if is_own_profile %}
+                <a href="{% url 'password_change' %}" class="button button--ghost">Passwort ändern</a>
+                {% endif %}
+                <a href="{% url 'profile-edit' profile_obj.pk %}" class="button">Bearbeiten</a>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

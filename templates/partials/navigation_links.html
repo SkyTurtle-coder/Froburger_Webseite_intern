@@ -1,0 +1,17 @@
+<a href="/" class="nav__item {% if current == 'dashboard' %}nav__item--active{% endif %}">Dashboard</a>
+<details class="nav__disclosure" {% if navigation_section_open %}open{% endif %}>
+    <summary class="nav__item nav__summary {% if navigation_section_open %}nav__summary--active{% endif %}">Navigation</summary>
+    <div class="nav__group">
+        {% if request.user.profile.can_manage_events %}
+        <a href="{% url 'event-list' %}" class="nav__item nav__item--subtle {% if current == 'event-list' or current == 'event-create' or current == 'event-edit' or current == 'event-delete' %}nav__item--active{% endif %}">Anlässe</a>
+        {% endif %}
+        <a href="{% url 'member-directory' %}" class="nav__item nav__item--subtle {% if current == 'member-directory' %}nav__item--active{% endif %}">Mitglieder</a>
+        <a href="{% url 'memorial-page' %}" class="nav__item nav__item--subtle {% if current == 'memorial-page' %}nav__item--active{% endif %}">Totentafel</a>
+        <a href="{% url 'document-hub' %}" class="nav__item nav__item--subtle {% if current == 'document-hub' or current == 'document-scope' %}nav__item--active{% endif %}">Dokumente</a>
+        <a href="{% url 'profile-detail' request.user.profile.pk %}" class="nav__item nav__item--subtle {% if current == 'profile-detail' or current == 'profile-edit' or current == 'password_change' or current == 'password_change_done' %}nav__item--active{% endif %}">Profil</a>
+        {% if request.user.profile.can_manage_roles %}
+        <a href="{% url 'profile-list' %}" class="nav__item nav__item--subtle {% if current == 'profile-list' or current == 'user-create' %}nav__item--active{% endif %}">Administration</a>
+        {% endif %}
+        <a href="{{ public_site_url }}" class="nav__item nav__item--subtle nav__item--external">Zur Webseite</a>
+    </div>
+</details>
