@@ -1,7 +1,9 @@
 Django>=5.1,<5.3
-Pillow>=10.4,<12.0
+# SEC-025: 11.x had 25 known CVEs (pip-audit, 2026-08-09), all fixed by 12.3.0.
+# Verified against the full test suite before bumping - no breakage found.
+Pillow>=12.3.0,<13.0
 whitenoise>=6.7,<7.0
 python-dotenv>=1.0,<2.0
 mysqlclient>=2.2,<3.0
 uvicorn>=0.35,<0.39
-icalendar==7.2.2
+icalendar>=7.2.2,<8.0

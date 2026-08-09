@@ -1,7 +1,9 @@
 from django.contrib.auth.models import User
 from django.db import transaction
 
+from . import public_media
 from .models import MemorialEntry
+from .public_members import is_public_member
 
 
 def sync_profile_membership_state(profile):
@@ -49,6 +51,19 @@ def sync_profile_side_effects(profile):
     with transaction.atomic():
         sync_profile_membership_state(profile)
         sync_profile_memorial_entry(profile)
+
+    # SEC-006: file deletion can't be rolled back, so it must only run once
+    # the DB state above is actually committed - never inside the atomic
+    # block. Removes cached public photo derivatives once a profile stops
+    # being publicly listed (deceased / lost its public role), using the
+    # exact same is_public_member() policy the public members API itself
+    # uses, so the two can never disagree about who counts as public.
+    transaction.on_commit(lambda: _purge_media_if_no_longer_public(profile))
+
+
+def _purge_media_if_no_longer_public(profile):
+    if not is_public_member(profile):
+        public_media.purge_public_member_media(profile.pk)
 
 
 def memorial_queryset():

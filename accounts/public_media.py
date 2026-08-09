@@ -1,4 +1,5 @@
 import hashlib
+import shutil
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -96,6 +97,19 @@ def _ensure_derivatives(profile, source_path):
             }
 
     return variants
+
+
+def purge_public_member_media(profile_pk):
+    """Deletes every cached public-facing derivative for one profile.
+
+    Safe to call unconditionally (a no-op if nothing was ever generated).
+    Never touches the original Profile.photo upload - only the derived
+    /media/public/members/<pk>/ files that _ensure_derivatives() creates,
+    which are what nginx serves directly with no auth check (SEC-006: these
+    were never cleaned up when a profile stopped being publicly listed).
+    """
+    public_root = Path(settings.MEDIA_ROOT) / "public" / "members" / str(profile_pk)
+    shutil.rmtree(public_root, ignore_errors=True)
 
 
 def _build_version(source_path):

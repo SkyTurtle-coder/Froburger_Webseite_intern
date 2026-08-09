@@ -54,6 +54,19 @@ for section_key, section_config in PUBLIC_SECTION_CONFIG.items():
         PUBLIC_ROLE_TO_SECTIONS.setdefault(role_code, []).append(section_key)
 
 
+def is_public_member(profile):
+    """Single source of truth for "does this profile appear in the public
+    member directory". Also used by the SEC-006 media-lifecycle cleanup
+    (accounts/services.py) so the two can never diverge on who counts as
+    public - a profile that build_public_members_payload() would exclude
+    must always be exactly the profiles whose cached public photo
+    derivatives get purged.
+    """
+    if profile.is_deceased:
+        return False
+    return bool(_collect_public_roles_by_section(profile))
+
+
 def build_public_members_payload():
     profiles = list(
         Profile.objects.select_related("user")
@@ -72,12 +85,10 @@ def build_public_members_payload():
     public_member_ids = set()
 
     for profile in profiles:
-        if profile.is_deceased:
+        if not is_public_member(profile):
             continue
 
         roles_by_section = _collect_public_roles_by_section(profile)
-        if not roles_by_section:
-            continue
 
         public_member_ids.add(profile.pk)
 

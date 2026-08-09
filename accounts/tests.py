@@ -22,7 +22,7 @@ from accounts import throttling
 from accounts.auth_backends import EmailOrVulgoBackend
 from accounts.management.commands.sync_public_members_page import validate_public_member_media_urls
 from accounts.models import MemorialEntry, Profile, Role
-from accounts.public_members import build_public_members_payload
+from accounts.public_members import build_public_members_payload, is_public_member
 from accounts.public_media import get_public_media_base_url
 from documents.models import Document, DocumentFolder, FolderScope
 from events.models import Event
@@ -467,6 +467,175 @@ class PublicMemberPhotoDerivativeTests(TestCase):
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=88)
         return buffer.getvalue()
+
+
+class PublicMemberMediaLifecycleTests(TestCase):
+    """SEC-006: cached public photo derivatives must be purged the moment a
+    profile stops being publicly listed, using the exact same policy
+    (is_public_member) as the public API itself - never the original photo."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.bursch_role = Role.objects.get(code="BURSCH")
+
+    def setUp(self):
+        self.temp_media_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_media_dir.cleanup)
+
+    def _jpeg_bytes(self, width=600, height=600):
+        image = Image.new("RGB", (width, height), color=(10, 80, 200))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=85)
+        return buffer.getvalue()
+
+    def test_is_public_member_matches_payload_inclusion(self):
+        user = User.objects.create_user(username="policy-check", password="testpass123")
+        profile = user.profile
+        profile.first_name = "Policy"
+        profile.last_name = "Check"
+        profile.save()
+
+        self.assertFalse(is_public_member(profile))
+
+        profile.roles.add(self.bursch_role)
+        self.assertTrue(is_public_member(profile))
+
+        profile.death_date = timezone.now().date()
+        profile.save()
+        profile.refresh_from_db()
+        self.assertFalse(is_public_member(profile))
+
+    @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
+    def test_derivatives_are_purged_when_profile_becomes_deceased(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            user = User.objects.create_user(username="fading", password="testpass123")
+            profile = user.profile
+            profile.first_name = "Fading"
+            profile.last_name = "Member"
+            profile.roles.add(self.bursch_role)
+            profile.photo = SimpleUploadedFile("portrait.jpg", self._jpeg_bytes(), content_type="image/jpeg")
+            profile.save()
+
+            build_public_members_payload()  # forces derivative generation
+            derivative_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            self.assertTrue(derivative_dir.exists())
+            self.assertGreater(len(list(derivative_dir.glob("*.webp"))), 0)
+
+            original_photo_path = Path(profile.photo.path)
+            self.assertTrue(original_photo_path.exists())
+
+            with self.captureOnCommitCallbacks(execute=True):
+                profile.death_date = timezone.now().date()
+                profile.save()
+
+            self.assertFalse(derivative_dir.exists(), "public derivatives must be gone once the profile is deceased")
+            self.assertTrue(original_photo_path.exists(), "the original uploaded photo must never be deleted")
+
+    @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
+    def test_derivatives_are_purged_when_public_role_is_removed(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            user = User.objects.create_user(username="rolegone", password="testpass123")
+            profile = user.profile
+            profile.first_name = "Role"
+            profile.last_name = "Gone"
+            profile.roles.add(self.bursch_role)
+            profile.photo = SimpleUploadedFile("portrait.jpg", self._jpeg_bytes(), content_type="image/jpeg")
+            profile.save()
+
+            build_public_members_payload()
+            derivative_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            self.assertTrue(derivative_dir.exists())
+
+            with self.captureOnCommitCallbacks(execute=True):
+                profile.roles.remove(self.bursch_role)
+                # M2M changes don't re-trigger post_save on Profile by
+                # themselves - save() is what the real admin UI flow does
+                # right after changing roles, and is what actually matters
+                # here (the signal, not the M2M change itself).
+                profile.save()
+
+            self.assertFalse(derivative_dir.exists())
+
+    @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
+    def test_still_public_profile_save_does_not_purge_derivatives(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            user = User.objects.create_user(username="staysvisible", password="testpass123")
+            profile = user.profile
+            profile.first_name = "Stays"
+            profile.last_name = "Visible"
+            profile.roles.add(self.bursch_role)
+            profile.photo = SimpleUploadedFile("portrait.jpg", self._jpeg_bytes(), content_type="image/jpeg")
+            profile.save()
+
+            build_public_members_payload()
+            derivative_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            self.assertTrue(derivative_dir.exists())
+
+            with self.captureOnCommitCallbacks(execute=True):
+                profile.academic_title = "Dr."
+                profile.save()
+
+            self.assertTrue(derivative_dir.exists(), "an unrelated profile edit must not purge a still-public member's photo")
+
+    @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
+    def test_becoming_public_again_regenerates_derivatives_on_demand(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            user = User.objects.create_user(username="comeback", password="testpass123")
+            profile = user.profile
+            profile.first_name = "Come"
+            profile.last_name = "Back"
+            profile.photo = SimpleUploadedFile("portrait.jpg", self._jpeg_bytes(), content_type="image/jpeg")
+            profile.save()  # no public role yet -> not public
+
+            derivative_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            self.assertFalse(derivative_dir.exists())
+
+            profile.roles.add(self.bursch_role)
+            profile.save()
+            build_public_members_payload()
+
+            self.assertTrue(derivative_dir.exists())
+            self.assertGreater(len(list(derivative_dir.glob("*.webp"))), 0)
+
+
+class PurgeStalePublicMemberMediaCommandTests(TestCase):
+    def setUp(self):
+        self.temp_media_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_media_dir.cleanup)
+
+    def test_dry_run_reports_without_deleting(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            stale_dir = Path(self.temp_media_dir.name) / "public" / "members" / "999999"
+            stale_dir.mkdir(parents=True)
+            (stale_dir / "leftover.webp").write_bytes(b"fake")
+
+            out = io.StringIO()
+            call_command("purge_stale_public_member_media", "--dry-run", stdout=out)
+
+            self.assertTrue(stale_dir.exists(), "dry-run must not delete anything")
+            self.assertIn("would remove", out.getvalue())
+            self.assertIn("999999", out.getvalue())
+
+    def test_real_run_removes_stale_directory_and_keeps_public_one(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            role = Role.objects.get(code="BURSCH")
+            user = User.objects.create_user(username="still-public", password="testpass123")
+            profile = user.profile
+            profile.roles.add(role)
+            profile.save()
+
+            public_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            public_dir.mkdir(parents=True)
+            (public_dir / "keep.webp").write_bytes(b"fake")
+
+            stale_dir = Path(self.temp_media_dir.name) / "public" / "members" / "999999"
+            stale_dir.mkdir(parents=True)
+            (stale_dir / "leftover.webp").write_bytes(b"fake")
+
+            call_command("purge_stale_public_member_media")
+
+            self.assertFalse(stale_dir.exists())
+            self.assertTrue(public_dir.exists())
 
 
 class PublicMemberSyncGuardTests(TestCase):
