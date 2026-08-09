@@ -500,3 +500,123 @@ class DocumentManagementTests(TestCase):
         second = self.client.post(reverse("document-delete", kwargs={"pk": self.root_document.pk}))
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 404)
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class DocumentUploadValidationTests(TestCase):
+    """SEC-004/SEC-009: general document uploads must be restricted to a
+    known-safe allowlist (extension + content-type + magic bytes), with an
+    application-level size limit, not just nginx's client_max_body_size."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.uploader = User.objects.create_user(username="upload-validation", password="testpass123")
+        cls.folder = DocumentFolder.objects.create(name="Ablage", scope=FolderScope.GENERAL)
+
+    def setUp(self):
+        self.client.login(username="upload-validation", password="testpass123")
+
+    def _upload(self, upload):
+        return self.client.post(
+            reverse("document-scope", kwargs={"scope": "general"}),
+            {
+                "action": "upload-document",
+                "document-title": "Testdokument",
+                "document-description": "",
+                "document-folder": "",
+                "document-file": upload,
+            },
+            follow=True,
+        )
+
+    def test_valid_pdf_is_accepted(self):
+        upload = SimpleUploadedFile("statuten.pdf", b"%PDF-1.4 valid content", content_type="application/pdf")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Document.objects.filter(title="Testdokument").exists())
+
+    def test_valid_docx_is_accepted(self):
+        upload = SimpleUploadedFile(
+            "bericht.docx",
+            b"PK\x03\x04" + b"0" * 20,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Document.objects.filter(title="Testdokument").exists())
+
+    def test_disallowed_extension_is_rejected(self):
+        upload = SimpleUploadedFile("script.exe", b"MZ" + b"0" * 20, content_type="application/x-msdownload")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+        self.assertContains(response, "Dieser Dateityp ist nicht erlaubt")
+
+    def test_executable_renamed_with_allowed_extension_is_rejected(self):
+        # The classic "shell.php.jpg" / "malware.exe renamed to .pdf" attack:
+        # extension alone must not be trusted, magic bytes have to match too.
+        upload = SimpleUploadedFile("harmless.pdf", b"MZ\x90\x00this-is-actually-an-exe", content_type="application/pdf")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+        self.assertContains(response, "Der Inhalt der Datei passt nicht zur Dateiendung")
+
+    def test_php_disguised_as_docx_is_rejected(self):
+        upload = SimpleUploadedFile(
+            "invoice.docx",
+            b"<?php system($_GET['c']); ?>",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+
+    def test_mime_mismatch_is_rejected(self):
+        upload = SimpleUploadedFile("statuten.pdf", b"%PDF-1.4 valid content", content_type="image/svg+xml")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+        self.assertContains(response, "Der Dateityp der Datei passt nicht zur Dateiendung")
+
+    def test_oversized_file_is_rejected(self):
+        from documents.forms import MAX_DOCUMENT_FILE_SIZE
+
+        oversized_content = b"%PDF-1.4 " + (b"0" * (MAX_DOCUMENT_FILE_SIZE + 1))
+        upload = SimpleUploadedFile("gross.pdf", oversized_content, content_type="application/pdf")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+        self.assertContains(response, "MB gross sein")
+
+    def test_file_without_extension_is_rejected(self):
+        upload = SimpleUploadedFile("noextension", b"some content without a dot", content_type="application/octet-stream")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+        self.assertContains(response, "Dateiendung")
+
+    def test_empty_file_is_rejected(self):
+        # Handled by Django's own FileField validation before clean_file()
+        # even runs - included so the behavior stays covered by this test
+        # class's expectations if that ever changes.
+        upload = SimpleUploadedFile("leer.pdf", b"", content_type="application/pdf")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+
+    def test_generic_octet_stream_content_type_is_still_accepted_with_valid_magic_bytes(self):
+        # Some browsers/OSes send application/octet-stream for less common
+        # types - shouldn't be treated as a mismatch when the extension and
+        # magic bytes both check out.
+        upload = SimpleUploadedFile("statuten.pdf", b"%PDF-1.4 valid content", content_type="application/octet-stream")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Document.objects.filter(title="Testdokument").exists())
+
+    def test_plain_text_upload_still_works(self):
+        # documents/models.py's file_icon and existing usage treat .txt as a
+        # first-class supported type - must keep working after this fix.
+        upload = SimpleUploadedFile("notiz.txt", b"Freitext ohne Signatur", content_type="text/plain")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Document.objects.filter(title="Testdokument").exists())
