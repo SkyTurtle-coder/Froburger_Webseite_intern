@@ -40,7 +40,7 @@ def _folder_queryset(scope):
 def _document_queryset(scope):
     return list(
         Document.objects.filter(visibility=scope)
-        .select_related("folder", "uploaded_by")
+        .select_related("folder", "uploaded_by__profile")
         .order_by("title", "-uploaded_at", "pk")
     )
 
