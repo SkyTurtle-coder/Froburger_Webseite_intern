@@ -4,10 +4,8 @@ WordPress signs each signup POST with a shared secret; Django verifies the
 signature, checks the timestamp is within a small window, and guards against
 replay by caching the signature for the duration of that window.
 
-A legacy path (a bare shared-secret header, no signature) is still accepted
-so an already-deployed WordPress build keeps working until it picks up the
-signing change. A *missing* secret is never treated as "no authentication
-required" on either path - see SEC-005 in the security audit.
+A missing secret is never treated as "no authentication required" - see
+SEC-002 in the security audit.
 """
 import hashlib
 import hmac
@@ -15,7 +13,6 @@ import time
 
 TIMESTAMP_HEADER = "X-AVF-Timestamp"
 SIGNATURE_HEADER = "X-AVF-Signature"
-LEGACY_SECRET_HEADER = "X-AVF-Event-Secret"
 DEFAULT_TOLERANCE_SECONDS = 300
 
 
@@ -45,9 +42,3 @@ def verify_signed_request(secret, slug, timestamp, body_bytes, signature, *, tol
         return False
     expected = compute_signature(secret, slug, ts, body_bytes)
     return hmac.compare_digest(expected, signature)
-
-
-def verify_legacy_secret(secret, provided):
-    if not (secret and provided):
-        return False
-    return hmac.compare_digest(provided, secret)

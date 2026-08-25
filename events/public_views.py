@@ -314,19 +314,13 @@ def _authenticate_signup_request(request, slug):
         )
 
     signature = request.headers.get(signing.SIGNATURE_HEADER, "")
-    if signature:
-        timestamp = request.headers.get(signing.TIMESTAMP_HEADER, "")
-        if not signing.verify_signed_request(secret, slug, timestamp, request.body, signature):
-            return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
-        if not cache.add(_signup_replay_cache_key(signature), True, timeout=signing.DEFAULT_TOLERANCE_SECONDS * 2):
-            return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
-        return None
+    timestamp = request.headers.get(signing.TIMESTAMP_HEADER, "")
+    if not signing.verify_signed_request(secret, slug, timestamp, request.body, signature):
+        return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
+    if not cache.add(_signup_replay_cache_key(signature), True, timeout=signing.DEFAULT_TOLERANCE_SECONDS * 2):
+        return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
 
-    provided = request.headers.get(signing.LEGACY_SECRET_HEADER, "")
-    if signing.verify_legacy_secret(secret, provided):
-        return None
-
-    return _error_response("invalid_authentication", "Die Anmeldung konnte nicht verarbeitet werden.", 403)
+    return None
 
 
 def legacy_upcoming_events_api(request):

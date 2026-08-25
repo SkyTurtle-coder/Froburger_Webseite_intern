@@ -376,27 +376,28 @@ class EventPublicSignupApiTests(TestCase):
     def setUp(self):
         cache.clear()
 
-    @staticmethod
-    def _auth_headers():
-        # Legacy shared-secret header - still accepted during the SEC-005
-        # migration window alongside the newer signed-request scheme.
-        return {"HTTP_X_AVF_EVENT_SECRET": TEST_SIGNUP_SECRET}
+    def _post(self, payload):
+        body = json.dumps(payload).encode("utf-8")
+        timestamp = str(int(timezone.now().timestamp()))
+        signature = signing.compute_signature(TEST_SIGNUP_SECRET, self.event.slug, timestamp, body)
+        return self.client.post(
+            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
+            data=body,
+            content_type="application/json",
+            HTTP_X_AVF_TIMESTAMP=timestamp,
+            HTTP_X_AVF_SIGNATURE=signature,
+        )
 
     def test_signup_api_creates_signup(self):
-        response = self.client.post(
-            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
-            data=json.dumps(
-                {
-                    "vulgo": "Newton",
-                    "attending": True,
-                    "values": {
-                        self.public_column.key: "Vegetarisch",
-                        self.private_column.key: "Haselnuss",
-                    },
-                }
-            ),
-            content_type="application/json",
-            **self._auth_headers(),
+        response = self._post(
+            {
+                "vulgo": "Newton",
+                "attending": True,
+                "values": {
+                    self.public_column.key: "Vegetarisch",
+                    self.private_column.key: "Haselnuss",
+                },
+            }
         )
 
         self.assertEqual(response.status_code, 201)
@@ -414,34 +415,24 @@ class EventPublicSignupApiTests(TestCase):
             values={self.public_column.key: "Alles"},
         )
 
-        response = self.client.post(
-            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
-            data=json.dumps(
-                {
-                    "vulgo": " newton ",
-                    "attending": False,
-                    "values": {self.public_column.key: "Vegetarisch"},
-                }
-            ),
-            content_type="application/json",
-            **self._auth_headers(),
+        response = self._post(
+            {
+                "vulgo": " newton ",
+                "attending": False,
+                "values": {self.public_column.key: "Vegetarisch"},
+            }
         )
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["code"], "duplicate_signup")
 
     def test_signup_api_rejects_unknown_fields(self):
-        response = self.client.post(
-            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
-            data=json.dumps(
-                {
-                    "vulgo": "Euler",
-                    "attending": True,
-                    "values": {"unbekannt": "x"},
-                }
-            ),
-            content_type="application/json",
-            **self._auth_headers(),
+        response = self._post(
+            {
+                "vulgo": "Euler",
+                "attending": True,
+                "values": {"unbekannt": "x"},
+            }
         )
 
         self.assertEqual(response.status_code, 400)
@@ -452,17 +443,12 @@ class EventPublicSignupApiTests(TestCase):
         self.event.end = timezone.now() + timedelta(hours=1)
         self.event.save(update_fields=["start", "end"])
 
-        response = self.client.post(
-            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
-            data=json.dumps(
-                {
-                    "vulgo": "Gauss",
-                    "attending": True,
-                    "values": {self.public_column.key: "Alles"},
-                }
-            ),
-            content_type="application/json",
-            **self._auth_headers(),
+        response = self._post(
+            {
+                "vulgo": "Gauss",
+                "attending": True,
+                "values": {self.public_column.key: "Alles"},
+            }
         )
 
         self.assertEqual(response.status_code, 409)
@@ -487,29 +473,19 @@ class EventPublicSignupApiTests(TestCase):
         self.assertEqual(response.json()["code"], "invalid_authentication")
 
     def test_signup_api_rate_limits_repeat_submit(self):
-        first = self.client.post(
-            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
-            data=json.dumps(
-                {
-                    "vulgo": "Leibniz",
-                    "attending": True,
-                    "values": {self.public_column.key: "Alles"},
-                }
-            ),
-            content_type="application/json",
-            **self._auth_headers(),
+        first = self._post(
+            {
+                "vulgo": "Leibniz",
+                "attending": True,
+                "values": {self.public_column.key: "Alles"},
+            }
         )
-        second = self.client.post(
-            reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
-            data=json.dumps(
-                {
-                    "vulgo": "Laplace",
-                    "attending": True,
-                    "values": {self.public_column.key: "Alles"},
-                }
-            ),
-            content_type="application/json",
-            **self._auth_headers(),
+        second = self._post(
+            {
+                "vulgo": "Laplace",
+                "attending": True,
+                "values": {self.public_column.key: "Alles"},
+            }
         )
 
         self.assertEqual(first.status_code, 201)
@@ -634,10 +610,11 @@ class EventSignupApiAuthenticationTests(TestCase):
         self.assertFalse(EventSignup.objects.filter(normalized_vulgo="poincare-replay").exists())
 
     @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
-    def test_signup_still_accepts_legacy_secret_header(self):
+    def test_signup_rejects_legacy_secret_header(self):
         body = self._body("Legacy")
         response = self._post(body, {"HTTP_X_AVF_EVENT_SECRET": TEST_SIGNUP_SECRET})
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "invalid_authentication")
 
     @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET=TEST_SIGNUP_SECRET)
     def test_signup_rejects_wrong_legacy_secret(self):
