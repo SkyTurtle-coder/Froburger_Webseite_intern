@@ -10,6 +10,11 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
+$expectedRemoteAppDir = "/srv/avf-intern/app"
+if ([string]::IsNullOrWhiteSpace($RemoteAppDir) -or $RemoteAppDir -ne $expectedRemoteAppDir) {
+    throw "RemoteAppDir must exactly match the approved application directory: $expectedRemoteAppDir"
+}
+
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $remoteBackupDir = "/srv/avf-intern/backups/app-$timestamp"
 $remoteArchivePath = "/tmp/avf-intern-app-$timestamp.tar"
@@ -53,7 +58,7 @@ if ($rsync) {
     }
     & tar -cf $localArchivePath -C $projectRoot @includePaths
     & scp @sshArgs $localArchivePath "${sshTarget}:$remoteArchivePath"
-    & ssh @sshArgs $sshTarget "sudo find '$RemoteAppDir' -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; sudo tar -xf '$remoteArchivePath' -C '$RemoteAppDir'; sudo rm -f '$remoteArchivePath'"
+    & ssh @sshArgs $sshTarget "set -eu; test '$RemoteAppDir' = '$expectedRemoteAppDir'; test -d '$RemoteAppDir'; sudo find '$RemoteAppDir' -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; sudo tar -xf '$remoteArchivePath' -C '$RemoteAppDir'; sudo rm -f '$remoteArchivePath'"
     Remove-Item -LiteralPath $localArchivePath -Force
 }
 
