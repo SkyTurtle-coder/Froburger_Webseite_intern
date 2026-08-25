@@ -33,6 +33,7 @@ __pycache__/
 /kontakt-live.html
 /data/
 /tools/wordpress/OPERATIONS-HISTORY.local.md
+/tools/wordpress/backups/
 
 # OS/editor
 .DS_Store
