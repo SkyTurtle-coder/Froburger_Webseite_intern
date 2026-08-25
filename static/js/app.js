@@ -10,6 +10,15 @@
     }
 
     const mobileQuery = window.matchMedia("(max-width: 767px)");
+    let focusableItems = [];
+
+    function updateFocusableItems() {
+        focusableItems = Array.from(
+            sidebar.querySelectorAll(
+                'a[href], button:not([disabled]), summary, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+        ).filter((item) => !item.hasAttribute("disabled") && item.getAttribute("aria-hidden") !== "true");
+    }
 
     function setOpen(isOpen) {
         const shouldOpen = Boolean(isOpen) && mobileQuery.matches;
@@ -18,6 +27,17 @@
         root.classList.toggle("nav-open", shouldOpen);
         toggle.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
         overlay.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
+        sidebar.setAttribute("aria-hidden", mobileQuery.matches ? (shouldOpen ? "false" : "true") : "false");
+
+        if (shouldOpen) {
+            updateFocusableItems();
+            window.requestAnimationFrame(() => {
+                const firstItem = focusableItems[0];
+                if (firstItem) {
+                    firstItem.focus();
+                }
+            });
+        }
     }
 
     function closeMenu() {
@@ -31,6 +51,27 @@
     overlay.addEventListener("click", closeMenu);
 
     document.addEventListener("keydown", (event) => {
+        if (event.key === "Tab" && mobileQuery.matches && toggle.getAttribute("aria-expanded") === "true") {
+            updateFocusableItems();
+            if (!focusableItems.length) {
+                return;
+            }
+
+            const firstItem = focusableItems[0];
+            const lastItem = focusableItems[focusableItems.length - 1];
+
+            if (event.shiftKey && document.activeElement === firstItem) {
+                event.preventDefault();
+                lastItem.focus();
+                return;
+            }
+
+            if (!event.shiftKey && document.activeElement === lastItem) {
+                event.preventDefault();
+                firstItem.focus();
+            }
+        }
+
         if (event.key === "Escape") {
             closeMenu();
             toggle.focus();
@@ -48,6 +89,9 @@
     mobileQuery.addEventListener("change", () => {
         if (!mobileQuery.matches) {
             closeMenu();
+            sidebar.removeAttribute("aria-hidden");
+        } else {
+            sidebar.setAttribute("aria-hidden", "true");
         }
     });
 

@@ -15,7 +15,7 @@
         </div>
         <div class="document-entry__details">
             <span>Stand {{ document.uploaded_at|date:"d.m.Y H:i" }}</span>
-            <span>Von {{ document.uploaded_by.username }}</span>
+            <span>Von {{ document.uploaded_by.profile.display_name }}</span>
         </div>
         <div class="document-entry__actions">
             {% if document.can_view and document.is_pdf %}

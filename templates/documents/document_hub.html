@@ -36,7 +36,7 @@
                 <p>{% if document.folder %}{{ document.folder.path_label }}{% else %}Ohne Ordner{% endif %}</p>
             </div>
             <div class="stack-list__meta">
-                <span>{{ document.uploaded_by.username }}</span>
+                <span>{{ document.uploaded_by.profile.display_name }}</span>
                 <small>{{ document.uploaded_at|date:"d.m.Y H:i" }}</small>
             </div>
         </article>

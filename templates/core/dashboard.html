@@ -6,11 +6,7 @@
 <section class="hero-card">
     <div class="dashboard-profile">
         <div class="dashboard-profile__media">
-            {% if profile_obj.photo %}
-            <img src="{% url 'profile-photo' profile_obj.pk %}" alt="{{ profile_obj.display_name }}" class="avatar-card__image">
-            {% else %}
-            <div class="avatar-card__placeholder">{{ profile_obj.first_name|slice:":1" }}{{ profile_obj.last_name|slice:":1" }}</div>
-            {% endif %}
+            {% include "partials/profile_avatar.html" with profile=profile_obj %}
         </div>
         <div class="dashboard-profile__content">
             <p class="section-kicker">Dashboard</p>
@@ -61,7 +57,21 @@
                 {% endif %}
             </div>
             {% if profile_completion.percent < 100 %}
-            <p class="dashboard-profile__note">Einige Profilangaben sind noch nicht hinterlegt.</p>
+            <div class="dashboard-profile__completion">
+                <div class="dashboard-profile__completion-copy">
+                    <p class="dashboard-profile__note">Einige Profilangaben sind noch nicht hinterlegt.</p>
+                    <a href="{% url 'profile-edit' profile_obj.pk %}" class="text-link">Profil vervollständigen</a>
+                </div>
+                <div class="dashboard-profile__completion-meter">
+                    <div class="dashboard-profile__completion-head">
+                        <span>Profilvollständigkeit</span>
+                        <strong>{{ profile_completion.completed }} / {{ profile_completion.total }}</strong>
+                    </div>
+                    <div class="progress-meter" aria-label="Profilvollständigkeit">
+                        <span class="progress-meter__bar" style="width: {{ profile_completion.percent }}%;"></span>
+                    </div>
+                </div>
+            </div>
             {% endif %}
         </div>
     </div>
@@ -141,7 +151,7 @@
                     <p>{% if document.folder %}{{ document.folder.path_label }}{% else %}Ohne Ordner{% endif %}</p>
                 </div>
                 <div class="stack-list__meta">
-                    <span>{{ document.uploaded_by.username }}</span>
+                    <span>{{ document.uploaded_by.profile.display_name }}</span>
                     <small>{{ document.uploaded_at|date:"d.m.Y H:i" }}</small>
                 </div>
             </article>

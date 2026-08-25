@@ -5,40 +5,44 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{{ app_name }}{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
-    <link rel="stylesheet" href="{% static 'css/navigation.css' %}">
-    <script src="{% static 'js/app.js' %}" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_version }}">
+    <link rel="stylesheet" href="{% static 'css/navigation.css' %}?v={{ static_asset_version }}">
+    <script src="{% static 'js/app.js' %}?v={{ static_asset_version }}" defer></script>
 </head>
 <body>
     {% with current=request.resolver_match.url_name %}
     <div class="shell">
         <aside class="sidebar" id="site-nav">
-            <div class="brand">
+            <div class="sidebar__inner">
+                <div class="brand">
                 <span class="brand__eyebrow">Intern</span>
                 <a href="/" class="brand__title">AV Froburger</a>
                 <p class="brand__text">Verwaltung, Mitglieder, Anlässe und Dokumente.</p>
-            </div>
+                </div>
 
             {% if request.user.is_authenticated %}
             <nav class="nav" aria-label="Hauptnavigation">
                 {% include "partials/navigation_links.html" %}
             </nav>
 
-            <section class="sidebar-panel">
-                <p class="section-kicker">Angemeldet</p>
-                <p class="sidebar-panel__text">{{ request.user.profile.first_name }} {{ request.user.profile.last_name }}</p>
-            </section>
+            <div class="sidebar__meta">
+                <section class="sidebar-panel">
+                    <p class="section-kicker">Angemeldet</p>
+                    <p class="sidebar-panel__text">{{ request.user.profile.first_name }} {{ request.user.profile.last_name }}</p>
+                </section>
 
-            <div class="sidebar__footer">
-                <form method="post" action="{% url 'logout' %}" class="nav-logout">
-                    {% csrf_token %}
-                    <button type="submit" class="nav__item nav__item--button">Abmelden</button>
-                </form>
-                {% if request.user.is_superuser %}
-                <a href="/admin/" class="text-link">Django Admin</a>
-                {% endif %}
+                <div class="sidebar__footer">
+                    <form method="post" action="{% url 'logout' %}" class="nav-logout">
+                        {% csrf_token %}
+                        <button type="submit" class="nav__item nav__item--button">Abmelden</button>
+                    </form>
+                    {% if request.user.is_superuser %}
+                    <a href="/admin/" class="text-link">Django Admin</a>
+                    {% endif %}
+                </div>
             </div>
             {% endif %}
+            </div>
         </aside>
 
         <main class="content" id="main-content">

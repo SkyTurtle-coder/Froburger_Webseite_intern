@@ -68,6 +68,7 @@ class NavigationAndUiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="https://test.avfroburger.ch/"')
+        self.assertContains(response, '?v=')
         self.assertContains(response, 'data-menu-toggle')
         self.assertContains(response, 'data-nav-overlay')
         self.assertNotContains(response, "mobile-nav__summary")
@@ -167,8 +168,7 @@ class NavigationAndUiTests(TestCase):
         response = self.client.get(reverse("dashboard"))
 
         rendered = response.content.decode()
-        self.assertIn('<details class="nav__disclosure" >', rendered)
-        self.assertNotIn('<details class="nav__disclosure" open>', rendered)
+        self.assertIn('<details class="nav__disclosure" open>', rendered)
 
     @override_settings(
         PUBLIC_WEBSITE_PRIMARY_URL="https://test.avfroburger.ch/",
@@ -238,6 +238,23 @@ class NavigationAndUiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "profile-form__grid")
         self.assertContains(response, "Speichern")
+
+    @override_settings(
+        PUBLIC_WEBSITE_PRIMARY_URL="https://test.avfroburger.ch/",
+        PUBLIC_WEBSITE_FALLBACK_URL="https://avfroburger.ch/",
+    )
+    @patch("core.public_site.urlopen")
+    def test_dashboard_links_profile_completion_notice_to_profile_edit(self, mock_urlopen):
+        mock_response = mock_urlopen.return_value.__enter__.return_value
+        mock_response.status = 200
+        mock_response.geturl.return_value = "https://test.avfroburger.ch/"
+        self.client.login(username="member-ui", password="testpass123")
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Profilvollständigkeit")
+        self.assertContains(response, reverse("profile-edit", kwargs={"pk": self.member.profile.pk}))
         self.assertNotContains(response, "Zum Inhalt")
 
     @override_settings(

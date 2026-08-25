@@ -1,5 +1,5 @@
 <a href="/" class="nav__item {% if current == 'dashboard' %}nav__item--active{% endif %}">Dashboard</a>
-<details class="nav__disclosure" {% if navigation_section_open %}open{% endif %}>
+<details class="nav__disclosure" open>
     <summary class="nav__item nav__summary {% if navigation_section_open %}nav__summary--active{% endif %}">Navigation</summary>
     <div class="nav__group">
         {% if request.user.profile.can_manage_events %}
