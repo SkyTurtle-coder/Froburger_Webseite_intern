@@ -29,11 +29,24 @@ class EventForm(forms.ModelForm):
             "is_cancelled",
             "show_on_homepage",
         )
+        labels = {
+            "title": "Titel",
+            "slug": "URL-Kürzel",
+            "short_description": "Kurzbeschreibung",
+            "description": "Beschreibung",
+            "start": "Beginn",
+            "end": "Ende",
+            "location": "Ort",
+            "status": "Status",
+            "is_public": "Öffentlich sichtbar",
+            "is_cancelled": "Abgesagt",
+            "show_on_homepage": "Auf Startseite zeigen",
+        }
         help_texts = {
-            "slug": "Leer lassen fuer automatische Generierung.",
-            "short_description": "Pflicht fuer oeffentliche Anlaesse.",
-            "location": "Pflicht fuer oeffentliche Anlaesse.",
-            "is_cancelled": "Abgesagte Anlaesse bleiben im Kalender als Absage sichtbar.",
+            "slug": "Leer lassen für automatische Generierung.",
+            "short_description": "Pflicht für öffentliche Anlässe.",
+            "location": "Pflicht für öffentliche Anlässe.",
+            "is_cancelled": "Abgesagte Anlässe bleiben im Kalender als Absage sichtbar.",
         }
 
 
@@ -50,13 +63,23 @@ class EventSignupColumnForm(forms.ModelForm):
             "field_options",
             "placeholder",
         )
+        labels = {
+            "label": "Spaltentitel",
+            "field_type": "Feldtyp",
+            "sort_order": "Reihenfolge",
+            "is_active": "Aktiv",
+            "is_required": "Pflichtfeld",
+            "is_public": "Öffentlich sichtbar",
+            "field_options": "Auswahloptionen",
+            "placeholder": "Platzhalter",
+        }
         help_texts = {
             "label": "Spaltenname.",
             "field_type": "Feldtyp.",
             "sort_order": "Kleinere Werte stehen weiter links.",
             "is_active": "Nur aktive Spalten werden verwendet.",
             "is_required": "Pflichtfeld.",
-            "is_public": "In der oeffentlichen Liste sichtbar.",
+            "is_public": "In der öffentlichen Liste sichtbar.",
             "field_options": "Eine Option pro Zeile.",
             "placeholder": "Optional.",
         }
@@ -74,7 +97,7 @@ class BaseEventSignupColumnFormSet(BaseInlineFormSet):
                 continue
             key = label.casefold()
             if key in labels:
-                raise forms.ValidationError("Zusatzspalten muessen pro Anlass unterschiedliche Titel haben.")
+                raise forms.ValidationError("Zusatzspalten müssen pro Anlass unterschiedliche Titel haben.")
             labels.add(key)
 
 
@@ -115,7 +138,7 @@ class EventSignupPublicForm(forms.Form):
                 field = forms.ChoiceField(
                     label=column.label,
                     required=column.is_required,
-                    choices=[("", "Bitte waehlen")] + [(option, option) for option in column.options],
+                    choices=[("", "Bitte wählen")] + [(option, option) for option in column.options],
                 )
             elif column.field_type == EventSignupColumn.FIELD_TYPE_CHECKBOX:
                 field = forms.BooleanField(
@@ -139,7 +162,7 @@ class EventSignupPublicForm(forms.Form):
     def clean_website(self):
         value = (self.cleaned_data.get("website") or "").strip()
         if value:
-            raise forms.ValidationError("Ungueltige Anfrage.")
+            raise forms.ValidationError("Ungültige Anfrage.")
         return ""
 
     def clean_vulgo(self):
@@ -152,7 +175,7 @@ class EventSignupPublicForm(forms.Form):
     def clean(self):
         cleaned_data = super().clean()
         if self.event.is_signup_closed:
-            raise forms.ValidationError("Die Anmeldung fuer diesen Anlass ist geschlossen.")
+            raise forms.ValidationError("Die Anmeldung für diesen Anlass ist geschlossen.")
         return cleaned_data
 
     def build_values(self):
@@ -176,7 +199,7 @@ class EventSignupManageForm(forms.Form):
         coerce=lambda value: value in (True, "True", "true", "1", 1, "yes", "on"),
         empty_value=None,
     )
-    delete = forms.BooleanField(label="Loeschen", required=False)
+    delete = forms.BooleanField(label="Löschen", required=False, widget=forms.HiddenInput())
 
     def __init__(self, *args, event, signup=None, **kwargs):
         self.event = event
@@ -199,7 +222,7 @@ class EventSignupManageForm(forms.Form):
                 field = forms.ChoiceField(
                     label=column.label,
                     required=False,
-                    choices=[("", "Bitte waehlen")] + [(option, option) for option in column.options],
+                    choices=[("", "Bitte wählen")] + [(option, option) for option in column.options],
                 )
             elif column.field_type == EventSignupColumn.FIELD_TYPE_CHECKBOX:
                 field = forms.BooleanField(label=column.label, required=False)

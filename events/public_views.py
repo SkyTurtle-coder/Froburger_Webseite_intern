@@ -37,6 +37,8 @@ def _event_to_payload(event):
         "title": event.title,
         "slug": event.slug,
         "short_description": event.short_description,
+        "status": event.status,
+        "status_label": event.get_status_display(),
         "start_at": start_at.isoformat(),
         "end_at": end_at.isoformat(),
         "timezone_name": event.timezone_name,
@@ -79,7 +81,7 @@ def _detail_payload(event):
     public_columns = [column for column in active_columns if column.is_public]
 
     signups = []
-    for signup in event.signups.order_by("created_at", "pk"):
+    for signup in event.signups.public_visible().order_by("created_at", "pk"):
         values = {}
         for column in public_columns:
             values[column.key] = _serialize_public_value(column, signup.values.get(column.key))
@@ -87,6 +89,7 @@ def _detail_payload(event):
             {
                 "vulgo": signup.vulgo,
                 "attending": signup.attending,
+                "created_at": timezone.localtime(signup.created_at).isoformat(),
                 "values": values,
             }
         )
@@ -298,13 +301,7 @@ def _signup_replay_cache_key(signature):
 
 
 def _authenticate_signup_request(request, slug):
-    """Authenticates a signup POST. Fails closed: an unconfigured secret always rejects.
-
-    Accepts either a signed request (X-AVF-Timestamp + X-AVF-Signature, an
-    HMAC-SHA256 over method/slug/timestamp/body-hash, replay-protected via a
-    short-lived cache entry) or, for a controlled migration window, the
-    legacy bare shared-secret header. See SEC-005.
-    """
+    """Authenticates a signed signup POST and fails closed when unconfigured."""
     secret = settings.PUBLIC_EVENT_SIGNUP_SHARED_SECRET
     if not secret:
         return _error_response(
@@ -389,7 +386,7 @@ def v1_event_signup_api(request, slug):
             attending=cleaned["attending"],
             values=cleaned["values"],
         )
-        signup.save()
+        signup.save(source=EventSignup.SOURCE_API)
     except IntegrityError:
         return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
 

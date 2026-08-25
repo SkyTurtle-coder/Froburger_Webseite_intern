@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from accounts.models import CalendarSubscription, Role
 from events import signing
-from events.models import Event, EventSignup, EventSignupColumn
+from events.models import Event, EventSignup, EventSignupColumn, SignupAuditLog
 
 TEST_SIGNUP_SECRET = "test-signing-secret-not-a-real-value"
 
@@ -117,6 +117,66 @@ class EventModelTests(TestCase):
         with self.assertRaises(ValidationError):
             duplicate.save()
 
+    def test_soft_deleted_signup_frees_vulgo_for_reuse(self):
+        now = timezone.now() + timedelta(days=7)
+        event = Event.objects.create(
+            title="Anlass",
+            short_description="Kurz",
+            description="Text",
+            start=now,
+            end=now + timedelta(hours=2),
+            location="Basel",
+            status="OFF",
+            is_public=True,
+        )
+        signup = EventSignup.objects.create(event=event, vulgo="Newton", attending=True, values={})
+
+        signup.delete(reason="Test")
+
+        replacement = EventSignup.objects.create(event=event, vulgo="Newton", attending=False, values={})
+        self.assertIsNotNone(replacement.pk)
+        self.assertEqual(EventSignup.objects.filter(event=event).count(), 1)
+        self.assertEqual(EventSignup.all_objects.filter(event=event).count(), 2)
+
+    def test_signup_audit_log_tracks_create_update_delete_restore(self):
+        now = timezone.now() + timedelta(days=7)
+        user = User.objects.create_user(username="audit-user", password="testpass123")
+        event = Event.objects.create(
+            title="Anlass",
+            short_description="Kurz",
+            description="Text",
+            start=now,
+            end=now + timedelta(hours=2),
+            location="Basel",
+            status="OFF",
+            is_public=True,
+        )
+        signup = EventSignup(
+            event=event,
+            vulgo="Newton",
+            attending=True,
+            values={},
+        )
+        signup.save(source=EventSignup.SOURCE_PUBLIC_FORM)
+
+        created_log = SignupAuditLog.objects.get(signup_id=signup.pk, action=SignupAuditLog.ACTION_CREATED)
+        self.assertEqual(created_log.source, SignupAuditLog.SOURCE_PUBLIC_FORM)
+
+        signup.vulgo = "Newton II"
+        signup.save(actor=user, source=EventSignup.SOURCE_INTERNAL)
+        updated_log = SignupAuditLog.objects.filter(signup_id=signup.pk, action=SignupAuditLog.ACTION_UPDATED).latest("created_at")
+        self.assertEqual(updated_log.actor, user)
+        self.assertEqual(updated_log.changes["vulgo"], ["Newton", "Newton II"])
+
+        signup.delete(actor=user, reason="Versehentlich", source=EventSignup.SOURCE_INTERNAL)
+        signup = EventSignup.all_objects.get(pk=signup.pk)
+        deleted_log = SignupAuditLog.objects.filter(signup_id=signup.pk, action=SignupAuditLog.ACTION_DELETED).latest("created_at")
+        self.assertEqual(deleted_log.changes["delete_reason"], ["", "Versehentlich"])
+
+        signup.restore(actor=user, source=EventSignup.SOURCE_INTERNAL)
+        restored_log = SignupAuditLog.objects.filter(signup_id=signup.pk, action=SignupAuditLog.ACTION_RESTORED).latest("created_at")
+        self.assertEqual(restored_log.actor, user)
+
 
 class EventPublicApiTests(TestCase):
     @classmethod
@@ -194,6 +254,16 @@ class EventPublicApiTests(TestCase):
                 cls.private_column.key: "Haselnuss",
             },
         )
+        EventSignup.objects.create(
+            event=cls.internal_wordpress,
+            vulgo="Nicht Oeffentlich",
+            attending=False,
+            is_public=False,
+            values={
+                cls.public_column.key: "Alles",
+                cls.private_column.key: "Intern",
+            },
+        )
 
     def test_legacy_upcoming_api_returns_expected_shape(self):
         response = self.client.get(reverse("api-public-events-upcoming"))
@@ -216,6 +286,10 @@ class EventPublicApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["count"], 2)
+
+        event = next(item for item in payload["results"] if item["slug"] == self.upcoming.slug)
+        self.assertEqual(event["status"], "OFF")
+        self.assertEqual(event["status_label"], "Off")
         self.assertIn("next", payload)
         self.assertIn("previous", payload)
         slugs = [item["slug"] for item in payload["results"]]
@@ -244,6 +318,8 @@ class EventPublicApiTests(TestCase):
         self.assertTrue(payload["signup_columns"][0]["public"])
         self.assertFalse(payload["signup_columns"][1]["public"])
         self.assertEqual(payload["signups"][0]["values"], {self.public_column.key: "Vegetarisch"})
+        self.assertEqual(len(payload["signups"]), 1)
+        self.assertIn("created_at", payload["signups"][0])
 
     def test_v1_detail_api_hides_non_wordpress_event(self):
         response = self.client.get(reverse("api-v1-event-detail", kwargs={"slug": "versteckter-interner-anlass"}))
@@ -726,6 +802,22 @@ class EventSignupManagementTests(TestCase):
         self.assertEqual(self.signup.vulgo, "Newton II")
         self.assertFalse(self.signup.attending)
         self.assertEqual(self.signup.values[self.column.key], "Kein Essen")
+
+    def test_webx_can_soft_delete_signup_row(self):
+        self.client.login(username="webx", password="testpass123")
+
+        response = self.client.post(
+            reverse("event-edit", kwargs={"pk": self.event.pk}),
+            {
+                "action": "delete-signup",
+                "delete_signup_id": str(self.signup.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(EventSignup.objects.filter(pk=self.signup.pk).exists())
+        deleted_signup = EventSignup.all_objects.get(pk=self.signup.pk)
+        self.assertIsNotNone(deleted_signup.deleted_at)
 
     def test_webx_can_manage_columns_on_event_form(self):
         self.client.login(username="webx", password="testpass123")

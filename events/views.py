@@ -116,7 +116,10 @@ class EventUpdateView(RoleAccessMixin, UpdateView):
 
     def post(self, request, *args, **kwargs):
         self.object = self.get_object()
-        if request.POST.get("action") == "manage-signups":
+        action = request.POST.get("action")
+        if action == "delete-signup":
+            return self._handle_signup_delete()
+        if action == "manage-signups":
             return self._handle_signup_management()
         return super().post(request, *args, **kwargs)
 
@@ -147,7 +150,7 @@ class EventUpdateView(RoleAccessMixin, UpdateView):
         signup_forms = self._build_manage_signup_forms()
         column_formset = EventSignupColumnFormSet(instance=self.object, prefix="columns")
         if not signup_forms:
-            messages.info(self.request, "Es sind noch keine Einschreibungen vorhanden.")
+            messages.info(self.request, "Es sind noch keine Anmeldungen vorhanden.")
             return redirect("event-edit", pk=self.object.pk)
 
         forms_valid = True
@@ -172,16 +175,16 @@ class EventUpdateView(RoleAccessMixin, UpdateView):
                         for form in signup_forms:
                             signup = form.signup
                             if form.cleaned_data.get("delete"):
-                                signup.delete()
+                                signup.delete(actor=self.request.user, source=EventSignup.SOURCE_INTERNAL)
                                 continue
                             signup.vulgo = form.cleaned_data["vulgo"]
                             signup.attending = form.cleaned_data["attending"]
                             signup.values = form.build_values()
-                            signup.save()
+                            signup.save(actor=self.request.user, source=EventSignup.SOURCE_INTERNAL)
                 except (IntegrityError, ValidationError):
-                    signup_forms[0].add_error(None, "Die Einschreibungen konnten nicht gespeichert werden.")
+                    signup_forms[0].add_error(None, "Die Anmeldungen konnten nicht gespeichert werden.")
                 else:
-                    messages.success(self.request, "Einschreibungen wurden aktualisiert.")
+                    messages.success(self.request, "Die Anmeldungen wurden aktualisiert.")
                     return redirect("event-edit", pk=self.object.pk)
 
         context = self.get_context_data(
@@ -190,6 +193,22 @@ class EventUpdateView(RoleAccessMixin, UpdateView):
             managed_signup_forms=signup_forms,
         )
         return self.render_to_response(context)
+
+    def _handle_signup_delete(self):
+        signup_id = self.request.POST.get("delete_signup_id", "").strip()
+        if not signup_id.isdigit():
+            messages.error(self.request, "Die Anmeldung konnte nicht gelöscht werden.")
+            return redirect("event-edit", pk=self.object.pk)
+
+        try:
+            signup = self.object.signups.get(pk=int(signup_id))
+        except EventSignup.DoesNotExist:
+            messages.error(self.request, "Die Anmeldung wurde nicht gefunden.")
+            return redirect("event-edit", pk=self.object.pk)
+
+        signup.delete(actor=self.request.user, source=EventSignup.SOURCE_INTERNAL)
+        messages.success(self.request, f"Die Anmeldung von {signup.vulgo} wurde gelöscht.")
+        return redirect("event-edit", pk=self.object.pk)
 
 
 class EventDeleteView(RoleAccessMixin, DeleteView):
@@ -231,7 +250,7 @@ class PublicEventDetailView(DetailView):
                     attending=form.cleaned_data["attending"],
                     values=form.build_values(),
                 )
-                signup.save()
+                signup.save(source=EventSignup.SOURCE_PUBLIC_FORM)
             except IntegrityError:
                 form.add_error("vulgo", "Dieses Vulgo ist für diesen Anlass bereits eingetragen.")
             except ValidationError as exc:
@@ -246,7 +265,7 @@ class PublicEventDetailView(DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        signups = list(self.object.signups.order_by("created_at", "pk"))
+        signups = list(self.object.signups.public_visible().order_by("created_at", "pk"))
         signup_columns = list(self.object.active_signup_columns())
         signup_rows = [
             {

@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% load i18n %}
 
 {% block page_title %}Anlass bearbeiten{% endblock %}
 
 {% block content %}
-<section class="panel panel--narrow">
+<section class="panel event-editor-panel">
     <div class="panel__header">
         <div>
             <p class="section-kicker">Anlässe</p>
@@ -14,7 +15,7 @@
     <form method="post" class="form-stack">
         {% csrf_token %}
         {% include "partials/form_fields.html" with form=form %}
-        <section class="panel panel--inner">
+        <section class="panel panel--inner event-editor-panel__inner">
             <div class="panel__header">
                 <div>
                     <p class="section-kicker">Anmeldetabelle</p>
@@ -95,41 +96,86 @@
 </section>
 
 {% if object %}
-<section class="panel">
-    <div class="panel__header">
+<section class="panel event-editor-panel event-editor-panel--signups">
+    <div class="panel__header event-signup-admin__header">
         <div>
             <p class="section-kicker">Anmeldungen</p>
-            <h2>Bestehende Einträge</h2>
-            <p class="panel__lead">{{ signup_count }} Einträge für diesen Anlass.</p>
+            <h2>Anmeldungen verwalten</h2>
+            <p class="panel__lead">
+                {% blocktranslate count counter=signup_count %}
+                1 Anmeldung für diesen Anlass.
+                {% plural %}
+                {{ counter }} Anmeldungen für diesen Anlass.
+                {% endblocktranslate %}
+            </p>
         </div>
+        <p class="event-signup-admin__hint">Bearbeitungen an Anmeldungen werden separat vom Anlassformular gespeichert.</p>
     </div>
     {% if managed_signup_forms %}
-    <form method="post" class="form-stack">
+    <form method="post" class="form-stack event-signup-admin" id="signup-management-form">
         {% csrf_token %}
-        <input type="hidden" name="action" value="manage-signups">
-        <div class="stack-list">
+        <input type="hidden" name="action" id="signup-form-action" value="manage-signups">
+        <input type="hidden" name="delete_signup_id" id="delete-signup-id" value="">
+        <div class="stack-list event-signup-admin__list">
             {% for signup_form in managed_signup_forms %}
-            <article class="stack-list__item stack-list__item--form">
+            <article class="stack-list__item stack-list__item--form signup-entry-card" data-signup-card>
                 <div class="stack-list__form">
                     {% for hidden in signup_form.hidden_fields %}{{ hidden }}{% endfor %}
                     {{ signup_form.non_field_errors }}
-                    <div class="two-column two-column--compact">
+                    <div class="signup-entry-card__header">
+                        <div>
+                            <h3>{{ signup_form.signup.vulgo }}</h3>
+                            <p class="signup-entry-card__meta">Eingegangen am {{ signup_form.signup.created_at|date:"d.m.Y" }} um {{ signup_form.signup.created_at|date:"H:i" }} Uhr</p>
+                        </div>
+                        <div class="signup-entry-card__actions">
+                            <button
+                                type="button"
+                                class="button button--ghost button--danger-ghost"
+                                data-open-signup-delete
+                                data-signup-label="{{ signup_form.signup.vulgo }}"
+                                data-signup-id="{{ signup_form.signup.pk }}"
+                            >
+                                Löschen
+                            </button>
+                        </div>
+                    </div>
+                    <div class="two-column two-column--compact signup-entry-card__grid">
                         {% for field in signup_form.visible_fields %}
+                        {% if field.name != "delete" %}
                         <div class="field {% if field.errors %}field--error{% endif %}">
                             <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                             {{ field }}
                             {{ field.errors }}
                         </div>
+                        {% endif %}
                         {% endfor %}
                     </div>
                 </div>
             </article>
             {% endfor %}
         </div>
-        <button type="submit" class="button">Einschreibungen speichern</button>
+        <div class="button-row event-signup-admin__footer">
+            <button type="submit" class="button">Änderungen speichern</button>
+            <p class="panel__lead">Vulgo, Anwesenheit und Zusatzfelder lassen sich direkt pro Anmeldung anpassen.</p>
+        </div>
     </form>
+    <dialog class="document-delete-dialog signup-delete-dialog" id="signup-delete-dialog">
+        <form method="dialog" class="document-delete-dialog__form">
+            <div class="document-delete-dialog__header">
+                <p class="section-kicker">Anmeldung löschen</p>
+                <h3>Wirklich löschen?</h3>
+            </div>
+            <p class="document-delete-dialog__copy">
+                Der Eintrag <strong id="signup-delete-dialog-name"></strong> wird beim Bestätigen sofort zum Löschen vorgemerkt und mit den übrigen Änderungen gespeichert.
+            </p>
+            <div class="document-delete-dialog__actions">
+                <button type="button" class="button button--ghost" id="signup-delete-dialog-cancel">Abbrechen</button>
+                <button type="button" class="button button--danger" id="signup-delete-dialog-confirm">Wirklich löschen</button>
+            </div>
+        </form>
+    </dialog>
     {% else %}
-    <p class="panel__lead">Noch keine Einschreibungen vorhanden.</p>
+    <p class="panel__lead">Noch keine Anmeldungen vorhanden.</p>
     {% endif %}
 </section>
 {% endif %}
@@ -141,12 +187,20 @@ document.addEventListener("DOMContentLoaded", function () {
     const template = document.getElementById("signup-column-template");
     const totalFormsInput = document.getElementById("id_columns-TOTAL_FORMS");
     const emptyState = document.getElementById("signup-column-empty");
-
-    if (!addButton || !list || !template || !totalFormsInput) {
-        return;
-    }
+    const signupForm = document.getElementById("signup-management-form");
+    const signupFormAction = document.getElementById("signup-form-action");
+    const deleteSignupId = document.getElementById("delete-signup-id");
+    const signupDeleteDialog = document.getElementById("signup-delete-dialog");
+    const signupDeleteName = document.getElementById("signup-delete-dialog-name");
+    const signupDeleteCancel = document.getElementById("signup-delete-dialog-cancel");
+    const signupDeleteConfirm = document.getElementById("signup-delete-dialog-confirm");
+    let activeDeleteSignupId = null;
 
     const toggleEmptyState = function () {
+        if (!list) {
+            return;
+        }
+
         const visibleCards = list.querySelectorAll("[data-column-form]:not([hidden])").length;
         if (emptyState) {
             emptyState.hidden = visibleCards > 0;
@@ -176,17 +230,82 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     };
 
-    list.querySelectorAll("[data-column-form]").forEach(attachRemoveHandler);
-    toggleEmptyState();
-
-    addButton.addEventListener("click", function () {
-        const formIndex = Number(totalFormsInput.value);
-        const fragment = template.innerHTML.replaceAll("__prefix__", String(formIndex));
-        list.insertAdjacentHTML("beforeend", fragment);
-        totalFormsInput.value = String(formIndex + 1);
-        attachRemoveHandler(list.lastElementChild);
+    if (list && template && totalFormsInput) {
+        list.querySelectorAll("[data-column-form]").forEach(attachRemoveHandler);
         toggleEmptyState();
+
+        if (addButton) {
+            addButton.addEventListener("click", function () {
+                const formIndex = Number(totalFormsInput.value);
+                const fragment = template.innerHTML.replaceAll("__prefix__", String(formIndex));
+                list.insertAdjacentHTML("beforeend", fragment);
+                totalFormsInput.value = String(formIndex + 1);
+                attachRemoveHandler(list.lastElementChild);
+                toggleEmptyState();
+            });
+        }
+    }
+
+    document.querySelectorAll("[data-open-signup-delete]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            activeDeleteSignupId = button.getAttribute("data-signup-id") || "";
+            if (!activeDeleteSignupId) {
+                return;
+            }
+
+            if (signupDeleteName) {
+                signupDeleteName.textContent = button.getAttribute("data-signup-label") || "dieser Anmeldung";
+            }
+
+            if (signupDeleteDialog && typeof signupDeleteDialog.showModal === "function") {
+                signupDeleteDialog.showModal();
+                return;
+            }
+
+            if (window.confirm("Wirklich löschen?")) {
+                if (signupFormAction) {
+                    signupFormAction.value = "delete-signup";
+                }
+                if (deleteSignupId) {
+                    deleteSignupId.value = activeDeleteSignupId;
+                }
+                if (signupForm) {
+                    signupForm.requestSubmit();
+                }
+            }
+        });
     });
+
+    if (signupDeleteCancel && signupDeleteDialog) {
+        signupDeleteCancel.addEventListener("click", function () {
+            signupDeleteDialog.close();
+            if (deleteSignupId) {
+                deleteSignupId.value = "";
+            }
+            activeDeleteSignupId = null;
+        });
+    }
+
+    if (signupDeleteConfirm) {
+        signupDeleteConfirm.addEventListener("click", function () {
+            if (!activeDeleteSignupId) {
+                return;
+            }
+
+            if (signupFormAction) {
+                signupFormAction.value = "delete-signup";
+            }
+            if (deleteSignupId) {
+                deleteSignupId.value = activeDeleteSignupId;
+            }
+            if (signupDeleteDialog) {
+                signupDeleteDialog.close();
+            }
+            if (signupForm) {
+                signupForm.requestSubmit();
+            }
+        });
+    }
 });
 </script>
 {% endblock %}
