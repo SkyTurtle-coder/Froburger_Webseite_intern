@@ -16,6 +16,7 @@ from accounts.management.commands.audit_content_import import (
     rewrite_fixture_for_seeded_roles,
 )
 from accounts.models import Role
+from accounts.roles import ROLE_CHOICES
 from events.models import Event
 
 
@@ -175,10 +176,10 @@ class AuditContentImportCommandTests(TestCase):
         events = [self.make_event_fixture(pk=3001 + index) for index in range(6)]
         payload = users + role_entries + profiles + events
         self.assertEqual(Counter(item["model"] for item in payload)["auth.user"], 22)
-        self.assertEqual(Counter(item["model"] for item in payload)["accounts.role"], 13)
+        self.assertEqual(Counter(item["model"] for item in payload)["accounts.role"], len(ROLE_CHOICES))
         self.assertEqual(Counter(item["model"] for item in payload)["accounts.profile"], 22)
         self.assertEqual(Counter(item["model"] for item in payload)["events.event"], 6)
-        self.assertEqual(len(payload), 63)
+        self.assertEqual(len(payload), 50 + len(ROLE_CHOICES))
         return payload
 
     def source_manifest_payload(self, fixture_path, fixture_payload):
@@ -531,11 +532,11 @@ class AuditContentImportCommandTests(TestCase):
         self.assertEqual(len(target_payload), 50)
 
         role_mapping_payload = json.loads(result["role_mapping"].read_text(encoding="utf-8"))
-        self.assertEqual(len(role_mapping_payload["roles"]), 13)
+        self.assertEqual(len(role_mapping_payload["roles"]), len(ROLE_CHOICES))
         self.assertGreater(role_mapping_payload["role_status_counts"]["ROLE_PK_REMAP_REQUIRED"], 0)
 
         manifest_payload = json.loads(result["target_manifest"].read_text(encoding="utf-8"))
-        self.assertEqual(manifest_payload["excluded_role_objects"], 13)
+        self.assertEqual(manifest_payload["excluded_role_objects"], len(ROLE_CHOICES))
         self.assertEqual(manifest_payload["final_object_counts"]["auth.user"], 22)
         self.assertEqual(manifest_payload["final_object_counts"]["accounts.profile"], 22)
         self.assertEqual(manifest_payload["final_object_counts"]["events.event"], 6)

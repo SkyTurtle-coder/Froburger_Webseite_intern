@@ -1,4 +1,5 @@
 from accounts.roles import ROLE_LABELS
+from django.conf import settings
 from core.public_site import get_public_site_url
 
 
@@ -25,4 +26,5 @@ def app_meta(request):
         "role_labels": ROLE_LABELS,
         "navigation_section_open": navigation_section_open,
         "public_site_url": get_public_site_url(),
+        "static_asset_version": settings.STATIC_ASSET_VERSION,
     }

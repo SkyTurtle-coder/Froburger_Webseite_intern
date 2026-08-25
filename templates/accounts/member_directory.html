@@ -14,14 +14,14 @@
     <form method="get" class="filter-bar filter-bar--members">
         <div class="field">
             <label for="id_q">Suche</label>
-            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Name, v/o oder Benutzername">
+            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Name, v/o oder E-Mail-Adresse">
         </div>
         <input type="hidden" name="sort" value="{{ active_sort }}">
         <input type="hidden" name="direction" value="{{ active_direction }}">
         <div class="filter-bar__actions">
             <button type="submit" class="button">Filtern</button>
             {% if active_query %}
-            <a href="{% url 'member-directory' %}" class="button button--ghost">Zurücksetzen</a>
+            <a href="{% url 'member-directory' %}" class="button button--ghost">Zur&uuml;cksetzen</a>
             {% endif %}
         </div>
     </form>
@@ -36,7 +36,14 @@
                             class="sort-link {% if active_sort == 'name' %}sort-link--active{% endif %}"
                         >
                             <span>Name</span>
-                            <span class="sort-link__icon" aria-hidden="true">{{ sort_state.name.symbol }}</span>
+                            <span class="sort-link__icon" aria-hidden="true">
+                                {% if active_sort == "name" %}
+                                    {% if active_direction == "asc" %}^
+                                    {% else %}v
+                                    {% endif %}
+                                {% else %}&lt;&gt;
+                                {% endif %}
+                            </span>
                         </a>
                     </th>
                     <th aria-sort="{{ sort_state.vulgo.aria_sort }}">
@@ -45,10 +52,17 @@
                             class="sort-link {% if active_sort == 'vulgo' %}sort-link--active{% endif %}"
                         >
                             <span>v/o</span>
-                            <span class="sort-link__icon" aria-hidden="true">{{ sort_state.vulgo.symbol }}</span>
+                            <span class="sort-link__icon" aria-hidden="true">
+                                {% if active_sort == "vulgo" %}
+                                    {% if active_direction == "asc" %}^
+                                    {% else %}v
+                                    {% endif %}
+                                {% else %}&lt;&gt;
+                                {% endif %}
+                            </span>
                         </a>
                     </th>
-                    <th>Benutzername</th>
+                    <th>E-Mail-Adresse</th>
                     <th>Rollen</th>
                 </tr>
             </thead>
@@ -63,12 +77,12 @@
                         {% endif %}
                     </td>
                     <td data-label="v/o">{{ profile.vulgo|default:"-" }}</td>
-                    <td data-label="Benutzername">{{ profile.user.username }}</td>
+                    <td data-label="E-Mail-Adresse">{{ profile.user.email|default:"-" }}</td>
                     <td data-label="Rollen">{% for role in profile.roles.all %}{% if not forloop.first %}, {% endif %}{{ role }}{% empty %}-{% endfor %}</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="4">Keine Mitglieder für die aktuelle Suche gefunden.</td>
+                    <td colspan="4">Keine Mitglieder f&uuml;r die aktuelle Suche gefunden.</td>
                 </tr>
                 {% endfor %}
             </tbody>

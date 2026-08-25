@@ -6,21 +6,13 @@
 <section class="panel">
     <div class="profile-layout">
         <div class="avatar-card">
-            {% if profile_obj.photo %}
-            <img src="{% url 'profile-photo' profile_obj.pk %}" alt="{{ profile_obj.display_name }}" class="avatar-card__image">
-            {% else %}
-            <div class="avatar-card__placeholder">{{ profile_obj.first_name|slice:":1" }}{{ profile_obj.last_name|slice:":1" }}</div>
-            {% endif %}
+            {% include "partials/profile_avatar.html" with profile=profile_obj %}
         </div>
         <div class="detail-layout">
             <dl class="detail-list">
                 <div class="detail-list__item">
                     <dt>Anzeigename</dt>
                     <dd>{{ profile_obj.display_name }}</dd>
-                </div>
-                <div class="detail-list__item">
-                    <dt>Benutzername</dt>
-                    <dd>{{ profile_obj.user.username }}</dd>
                 </div>
                 <div class="detail-list__item">
                     <dt>E-Mail</dt>
@@ -89,7 +81,7 @@
             <section class="info-panel">
                 <p class="section-kicker">Berechtigungen</p>
                 <div class="info-panel__row">
-                    <span>Anlässe verwalten</span>
+                    <span>Anl&auml;sse verwalten</span>
                     <strong>{% if can_manage_events %}Ja{% else %}Nein{% endif %}</strong>
                 </div>
                 <div class="info-panel__row">
@@ -100,12 +92,12 @@
 
             {% if is_own_profile %}
             <section class="info-panel">
-                <p class="section-kicker">Profilvollständigkeit</p>
+                <p class="section-kicker">Profilvollst&auml;ndigkeit</p>
                 <div class="info-panel__row">
                     <span>Pflegbare Angaben</span>
                     <strong>{{ profile_completion.completed }} / {{ profile_completion.total }}</strong>
                 </div>
-                <div class="progress-meter" aria-label="Profilvollständigkeit">
+                <div class="progress-meter" aria-label="Profilvollst&auml;ndigkeit">
                     <span class="progress-meter__bar" style="width: {{ profile_completion.percent }}%;"></span>
                 </div>
             </section>
@@ -113,7 +105,10 @@
 
             <div class="button-row">
                 {% if is_own_profile %}
-                <a href="{% url 'password_change' %}" class="button button--ghost">Passwort ändern</a>
+                <a href="{% url 'password_change' %}" class="button button--ghost">Passwort &auml;ndern</a>
+                {% endif %}
+                {% if can_manage_profile %}
+                <a href="{% url 'profile-password-reset' profile_obj.pk %}" class="button button--ghost">Passwort zur&uuml;cksetzen (Admin)</a>
                 {% endif %}
                 <a href="{% url 'profile-edit' profile_obj.pk %}" class="button">Bearbeiten</a>
             </div>

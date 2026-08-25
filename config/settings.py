@@ -48,6 +48,20 @@ def env_path(*names, default):
     return Path(raw).expanduser()
 
 
+def static_asset_version():
+    explicit = env_str("STATIC_ASSET_VERSION", default="")
+    if explicit:
+        return explicit
+
+    candidate_files = (
+        BASE_DIR / "static" / "css" / "app.css",
+        BASE_DIR / "static" / "css" / "navigation.css",
+        BASE_DIR / "static" / "js" / "app.js",
+    )
+    mtimes = [int(path.stat().st_mtime) for path in candidate_files if path.exists()]
+    return str(max(mtimes)) if mtimes else "1"
+
+
 # SEC-015: reject known placeholders from every template shipped in this repo
 # (.env.example, .env.production.example, deploy/*.example), Django's own
 # "django-insecure-..." startproject prefix, and anything implausibly short
@@ -189,6 +203,7 @@ STATIC_URL = "/static/"
 STATIC_ROOT = env_path("STATIC_ROOT", default=BASE_DIR / "staticfiles")
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STATIC_ASSET_VERSION = static_asset_version()
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env_path("MEDIA_ROOT", default=BASE_DIR / "media")
@@ -201,6 +216,7 @@ MEDIA_ROOT = env_path("MEDIA_ROOT", default=BASE_DIR / "media")
 # turns out to be too short/long in practice.
 SESSION_COOKIE_AGE = env_int("DJANGO_SESSION_COOKIE_AGE", 8 * 60 * 60)
 SESSION_SAVE_EVERY_REQUEST = True
+PASSWORD_RESET_TIMEOUT = env_int("PASSWORD_RESET_TIMEOUT", 7200)
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
@@ -209,6 +225,23 @@ AUTHENTICATION_BACKENDS = [
     "accounts.auth_backends.EmailOrVulgoBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
+EMAIL_BACKEND = env_str(
+    "EMAIL_BACKEND",
+    default=(
+        "django.core.mail.backends.console.EmailBackend"
+        if DEBUG
+        else "django.core.mail.backends.smtp.EmailBackend"
+    ),
+)
+EMAIL_HOST = env_str("EMAIL_HOST", default="")
+EMAIL_PORT = env_int("EMAIL_PORT", 25)
+EMAIL_HOST_USER = env_str("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env_str("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
+DEFAULT_FROM_EMAIL = env_str(
+    "DEFAULT_FROM_EMAIL",
+    default="AV Froburger Intern <noreply@localhost>",
+)
 
 PUBLIC_EVENT_SOURCE_BASE_URL = os.getenv("PUBLIC_EVENT_SOURCE_BASE_URL", "").rstrip("/")
 PUBLIC_EVENT_DETAIL_PATH_PREFIX = os.getenv("PUBLIC_EVENT_DETAIL_PATH_PREFIX", "/anlaesse").strip() or "/anlaesse"

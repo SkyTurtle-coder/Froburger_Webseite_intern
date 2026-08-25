@@ -14,7 +14,7 @@ class ProfileAdmin(admin.ModelAdmin):
     form = AdminProfileForm
     list_display = ("full_name_with_title", "user", "membership_status_label", "entry_term_display", "exit_term_display")
     list_filter = ("entry_semester", "exit_semester", "roles")
-    search_fields = ("first_name", "last_name", "vulgo", "academic_title", "degree_program", "user__username")
+    search_fields = ("first_name", "last_name", "vulgo", "academic_title", "degree_program", "user__email")
     filter_horizontal = ("roles",)
     readonly_fields = ("membership_status_label", "membership_period_display")
     fieldsets = (

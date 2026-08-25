@@ -30,6 +30,14 @@ IDENTIFIER_MAX_ATTEMPTS = 8
 IDENTIFIER_WINDOW_SECONDS = 600
 IDENTIFIER_COOLDOWN_SECONDS = 60
 
+RESET_IP_MAX_ATTEMPTS = 12
+RESET_IP_WINDOW_SECONDS = 1800
+RESET_IP_COOLDOWN_SECONDS = 1800
+
+RESET_IDENTIFIER_MAX_ATTEMPTS = 3
+RESET_IDENTIFIER_WINDOW_SECONDS = 1800
+RESET_IDENTIFIER_COOLDOWN_SECONDS = 1800
+
 
 def client_ip(request):
     """Best-effort client IP, trusting only the hop nginx itself appends.
@@ -56,6 +64,14 @@ def _attempts_key(kind, value):
 
 def _cooldown_key(kind, value):
     return f"login-throttle:{kind}:cooldown:{value}"
+
+
+def _reset_attempts_key(kind, value):
+    return f"password-reset-throttle:{kind}:attempts:{value}"
+
+
+def _reset_cooldown_key(kind, value):
+    return f"password-reset-throttle:{kind}:cooldown:{value}"
 
 
 def _is_blocked(kind, value):
@@ -90,3 +106,42 @@ def clear_attempts_for_identifier(identifier):
         return
     cache.delete(_attempts_key("id", identifier))
     cache.delete(_cooldown_key("id", identifier))
+
+
+def _normalize_reset_identifier(value):
+    return " ".join((value or "").strip().split()).casefold()
+
+
+def _register_reset_attempt(kind, value, window_seconds, max_attempts, cooldown_seconds):
+    key = _reset_attempts_key(kind, value)
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=window_seconds)
+        count = 1
+    if count >= max_attempts:
+        cache.set(_reset_cooldown_key(kind, value), True, timeout=cooldown_seconds)
+
+
+def _is_reset_blocked(kind, value):
+    return bool(cache.get(_reset_cooldown_key(kind, value)))
+
+
+def is_password_reset_throttled(request, email):
+    ip = client_ip(request)
+    identifier = _normalize_reset_identifier(email)
+    return _is_reset_blocked("ip", ip) or (bool(identifier) and _is_reset_blocked("id", identifier))
+
+
+def register_password_reset_attempt(request, email):
+    ip = client_ip(request)
+    identifier = _normalize_reset_identifier(email)
+    _register_reset_attempt("ip", ip, RESET_IP_WINDOW_SECONDS, RESET_IP_MAX_ATTEMPTS, RESET_IP_COOLDOWN_SECONDS)
+    if identifier:
+        _register_reset_attempt(
+            "id",
+            identifier,
+            RESET_IDENTIFIER_WINDOW_SECONDS,
+            RESET_IDENTIFIER_MAX_ATTEMPTS,
+            RESET_IDENTIFIER_COOLDOWN_SECONDS,
+        )

@@ -1,7 +1,9 @@
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
+from django.utils.crypto import get_random_string
 
+from . import throttling
 from .models import MemorialEntry, Profile, Role
 
 
@@ -18,6 +20,20 @@ class RoleMultipleChoiceField(forms.ModelMultipleChoiceField):
         return obj.display_label
 
 
+class MemberCsvImportForm(forms.Form):
+    csv_file = forms.FileField(
+        label="CSV-Datei",
+        help_text="Erwartete Spalten: Name, Vorname, Vulgo, E-Mail-Adresse und Status. Status: Aktivitas, Alt-Froburger oder Ehrenphilister.",
+    )
+
+    def clean_csv_file(self):
+        uploaded_file = self.cleaned_data["csv_file"]
+        file_name = (uploaded_file.name or "").lower()
+        if not file_name.endswith(".csv"):
+            raise forms.ValidationError("Bitte eine CSV-Datei hochladen.")
+        return uploaded_file
+
+
 class ProfileBaseForm(forms.ModelForm):
     birth_date = forms.DateField(
         label="Geburtsdatum",
@@ -25,11 +41,18 @@ class ProfileBaseForm(forms.ModelForm):
         input_formats=[ISO_DATE_INPUT_FORMAT],
         widget=html5_date_input(),
     )
+    avatar_icon = forms.ChoiceField(
+        label="Standard-Icon",
+        required=False,
+        choices=[("", "Eigenes Foto / Initialen"), *Profile.AvatarIcon.choices],
+        widget=forms.RadioSelect,
+    )
 
     class Meta:
         model = Profile
         fields = (
             "photo",
+            "avatar_icon",
             "first_name",
             "last_name",
             "vulgo",
@@ -53,6 +76,12 @@ class UserWithProfileCreationForm(UserCreationForm):
     last_name = forms.CharField(label="Name", max_length=150)
     vulgo = forms.CharField(label="v/o", max_length=150, required=False)
     photo = forms.ImageField(label="Profilfoto", required=False)
+    avatar_icon = forms.ChoiceField(
+        label="Standard-Icon",
+        required=False,
+        choices=[("", "Eigenes Foto / Initialen"), *Profile.AvatarIcon.choices],
+        widget=forms.RadioSelect,
+    )
     academic_title = forms.CharField(
         label="Abschluss / Titel",
         max_length=150,
@@ -92,14 +121,20 @@ class UserWithProfileCreationForm(UserCreationForm):
 
     class Meta(UserCreationForm.Meta):
         model = User
-        fields = ("username", "email", "password1", "password2")
+        fields = ("email", "password1", "password2")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields.pop("username", None)
         self.fields["roles"].queryset = Role.objects.order_by("code")
 
     def save(self, commit=True):
         user = super().save(commit=False)
+        while True:
+            username = f"mitglied-{get_random_string(32).lower()}"
+            if not User.objects.filter(username=username).exists():
+                user.username = username
+                break
         user.email = self.cleaned_data["email"]
         if commit:
             user.save()
@@ -117,10 +152,38 @@ class UserWithProfileCreationForm(UserCreationForm):
             profile.death_date = self.cleaned_data["death_date"]
             if self.cleaned_data.get("photo"):
                 profile.photo = self.cleaned_data["photo"]
+            profile.avatar_icon = self.cleaned_data["avatar_icon"]
             profile.full_clean()
             profile.save()
             profile.roles.set(self.cleaned_data["roles"])
         return user
+
+
+class AdminUserPasswordResetForm(SetPasswordForm):
+    new_password1 = forms.CharField(
+        label="Neues Passwort",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        help_text=SetPasswordForm.base_fields["new_password1"].help_text,
+    )
+    new_password2 = forms.CharField(
+        label="Neues Passwort bestätigen",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        help_text="Zur Bestätigung das neue Passwort erneut eingeben.",
+    )
+
+
+class PortalPasswordResetForm(PasswordResetForm):
+    """Project-specific subclass only for neutral reset-mail throttling."""
+
+    def save(self, *args, **kwargs):
+        request = kwargs.get("request")
+        email = self.cleaned_data.get("email", "")
+        if throttling.is_password_reset_throttled(request, email):
+            return
+        throttling.register_password_reset_attempt(request, email)
+        return super().save(*args, **kwargs)
 
 
 class ProfileForm(ProfileBaseForm):

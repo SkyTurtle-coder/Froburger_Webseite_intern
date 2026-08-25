@@ -23,7 +23,7 @@
                 <div class="field avf-memorial-existing-document">
                     <span class="field__label">Vorhandener Nachruf</span>
                     <div class="button-row avf-memorial-actions avf-memorial-actions--form">
-                        <a href="{% url 'document-preview' existing_obituary_document.pk %}" class="button button--ghost avf-memorial-action">Öffnen</a>
+                        <a href="{% url 'document-preview' existing_obituary_document.pk %}" class="button button--ghost avf-memorial-action">&Ouml;ffnen</a>
                         <a href="{% url 'document-download' existing_obituary_document.pk %}" class="button button--ghost avf-memorial-action">Herunterladen</a>
                     </div>
                 </div>
@@ -33,7 +33,9 @@
         </section>
 
         <div class="button-row profile-form__actions avf-memorial-form-actions">
-            <button type="submit" class="button avf-memorial-submit">{{ submit_label }}</button>
+            <button type="submit" class="button avf-memorial-submit">
+                {% if object %}&Auml;nderungen speichern{% else %}Eintrag erstellen{% endif %}
+            </button>
             <a href="{% url 'memorial-page' %}" class="button button--ghost avf-memorial-action">Abbrechen</a>
         </div>
     </form>

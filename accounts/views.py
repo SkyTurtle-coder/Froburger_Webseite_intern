@@ -2,6 +2,7 @@ from pathlib import Path
 import unicodedata
 
 from django.contrib import messages
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView
@@ -12,15 +13,24 @@ from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
-from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
+from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView
+from django.views.generic.detail import SingleObjectMixin
 
 from core.permissions import RoleAccessMixin
 from documents.models import Document, FolderScope
 
 from .auth_forms import VulgoAuthenticationForm
-from .forms import AdminProfileForm, MemorialEntryForm, PortalMemorialEntryForm, ProfileForm, UserWithProfileCreationForm
+from .forms import (
+    AdminProfileForm,
+    AdminUserPasswordResetForm,
+    MemorialEntryForm,
+    MemberCsvImportForm,
+    PortalMemorialEntryForm,
+    ProfileForm,
+    UserWithProfileCreationForm,
+)
 from .models import MemorialEntry, Profile, Role
-from .services import memorial_queryset
+from .services import import_members_from_csv, memorial_queryset
 
 
 def _delete_document_file_if_unused(file_name):
@@ -71,7 +81,7 @@ class ProfileListView(RoleAccessMixin, ListView):
                 Q(first_name__icontains=query)
                 | Q(last_name__icontains=query)
                 | Q(vulgo__icontains=query)
-                | Q(user__username__icontains=query)
+                | Q(user__email__icontains=query)
             )
         if role_code:
             queryset = queryset.filter(roles__code=role_code)
@@ -157,7 +167,7 @@ class MemberDirectoryView(LoginRequiredMixin, ListView):
                 Q(first_name__icontains=query)
                 | Q(last_name__icontains=query)
                 | Q(vulgo__icontains=query)
-                | Q(user__username__icontains=query)
+                | Q(user__email__icontains=query)
             )
         sort, direction = self._active_sort()
         return self._sorted_profiles(list(queryset.distinct()), sort, direction)
@@ -173,12 +183,12 @@ class MemberDirectoryView(LoginRequiredMixin, ListView):
             "name": {
                 "aria_sort": "ascending" if sort == "name" and direction == "asc" else "descending" if sort == "name" else "none",
                 "next_direction": "desc" if sort == "name" and direction == "asc" else "asc",
-                "symbol": "↑" if sort == "name" and direction == "asc" else "↓" if sort == "name" else "↕",
+                "symbol": "^" if sort == "name" and direction == "asc" else "v" if sort == "name" else "<>",
             },
             "vulgo": {
                 "aria_sort": "ascending" if sort == "vulgo" and direction == "asc" else "descending" if sort == "vulgo" else "none",
                 "next_direction": "desc" if sort == "vulgo" and direction == "asc" else "asc",
-                "symbol": "↑" if sort == "vulgo" and direction == "asc" else "↓" if sort == "vulgo" else "↕",
+                "symbol": "^" if sort == "vulgo" and direction == "asc" else "v" if sort == "vulgo" else "<>",
             },
         }
         return context
@@ -191,8 +201,26 @@ class UserCreateView(RoleAccessMixin, CreateView):
     success_url = reverse_lazy("profile-list")
 
     def form_valid(self, form):
-        messages.success(self.request, "Benutzer wurde angelegt.")
+        messages.success(self.request, "Mitglied wurde angelegt.")
         return super().form_valid(form)
+
+
+class MemberCsvImportView(RoleAccessMixin, FormView):
+    form_class = MemberCsvImportForm
+    template_name = "accounts/member_import.html"
+    required_roles = ("ADMIN",)
+
+    def form_valid(self, form):
+        try:
+            import_result = import_members_from_csv(form.cleaned_data["csv_file"])
+        except ValueError as error:
+            form.add_error("csv_file", str(error))
+            return self.form_invalid(form)
+
+        messages.success(self.request, f"{import_result.created_count} Mitglieder wurden angelegt.")
+        context = self.get_context_data(form=MemberCsvImportForm())
+        context["import_result"] = import_result
+        return self.render_to_response(context)
 
 
 class ProfileDetailView(LoginRequiredMixin, DetailView):
@@ -218,6 +246,7 @@ class ProfileDetailView(LoginRequiredMixin, DetailView):
         context["profile_completion"] = self.object.editable_profile_completion
         context["profile_roles"] = [role.display_label for role in self.object.roles.all()]
         context["membership_status_label"] = self.object.membership_status_label
+        context["password_reset_form"] = AdminUserPasswordResetForm(user=self.object.user)
         return context
 
 
@@ -248,6 +277,43 @@ class ProfileUpdateView(LoginRequiredMixin, UpdateView):
     def form_valid(self, form):
         messages.success(self.request, "Profil wurde gespeichert.")
         return super().form_valid(form)
+
+
+class AdminPasswordResetView(RoleAccessMixin, SingleObjectMixin, FormView):
+    model = Profile
+    form_class = AdminUserPasswordResetForm
+    template_name = "accounts/password_reset_form.html"
+    context_object_name = "profile_obj"
+    required_roles = ("ADMIN",)
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        return super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        return super().post(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.object.user
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["profile_obj"] = self.object
+        context["target_user"] = self.object.user
+        return context
+
+    def get_success_url(self):
+        return reverse_lazy("profile-detail", kwargs={"pk": self.object.pk})
+
+    def form_valid(self, form):
+        target_user = form.save()
+        if target_user.pk == self.request.user.pk:
+            update_session_auth_hash(self.request, target_user)
+        messages.success(self.request, f"Passwort für {target_user.profile.display_name} wurde zurückgesetzt.")
+        return redirect(self.get_success_url())
 
 
 class MemorialPageView(LoginRequiredMixin, TemplateView):

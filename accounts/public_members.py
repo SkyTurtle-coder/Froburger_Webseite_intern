@@ -8,7 +8,7 @@ from .public_media import build_public_member_photo
 from .roles import ROLE_LABELS
 
 
-PUBLIC_MEMBERS_SCHEMA_VERSION = 2
+PUBLIC_MEMBERS_SCHEMA_VERSION = 3
 
 PUBLIC_COMMITTEE_ROLE_CODES = (
     "SENIOR",
@@ -23,7 +23,11 @@ PUBLIC_SECTION_DEFINITIONS = (
     ("salon", "Der Salon", ("BURSCH",)),
     ("stall", "Der Stall", ("FUX",)),
     ("altfroburger", "Altfroburger", ("ALTFROBURGER",)),
-    ("af_committee", "Das Altfroburger-Komitee", ("AF_PRAESIDENT", "AF_AKTUAR", "AF_KASSIER")),
+    (
+        "af_committee",
+        "Das Altfroburger-Komitee",
+        ("AF_PRAESIDENT", "AF_AKTUAR", "AF_KASSIER", "AF_BEISITZER", "AF_TOTENFEIERN"),
+    ),
 )
 
 PUBLIC_ROLE_SORT_ORDER = {
@@ -38,6 +42,8 @@ PUBLIC_ROLE_SORT_ORDER = {
     "AF_PRAESIDENT": 130,
     "AF_AKTUAR": 140,
     "AF_KASSIER": 150,
+    "AF_BEISITZER": 160,
+    "AF_TOTENFEIERN": 170,
 }
 
 PUBLIC_SECTION_CONFIG = {
@@ -62,7 +68,7 @@ def is_public_member(profile):
     must always be exactly the profiles whose cached public photo
     derivatives get purged.
     """
-    if profile.is_deceased:
+    if profile.is_deceased or profile.is_inactive_member:
         return False
     return bool(_collect_public_roles_by_section(profile))
 
@@ -141,7 +147,9 @@ def _collect_public_roles_by_section(profile):
 
 def _member_payload(profile, public_roles):
     display_name = f"{profile.first_name} {profile.last_name}".strip()
-    photo = build_public_member_photo(profile)
+    avatar_icon = profile.avatar_icon if profile.avatar_icon in Profile.AvatarIcon.values else None
+    public_photo = None if avatar_icon else build_public_member_photo(profile)
+    photo = public_photo if public_photo and public_photo["variants"] else None
     entry_display = profile.entry_term_display
 
     return {
@@ -161,6 +169,7 @@ def _member_payload(profile, public_roles):
         "entry_display": entry_display,
         "academic_title": profile.academic_title,
         "degree_program": profile.degree_program,
+        "avatar_icon": avatar_icon,
         "roles": [
             {
                 "key": role["key"],
@@ -206,10 +215,15 @@ def _content_hash(payload):
                     "academic_title": member["academic_title"],
                     "degree_program": member["degree_program"],
                     "roles": member["roles"],
-                    "photo": {
-                        "fallback": member["photo"]["fallback"],
-                        "variants": member["photo"]["variants"] if member["photo"]["variants"] else [],
-                    },
+                    "avatar_icon": member["avatar_icon"],
+                    "photo": (
+                        {
+                            "fallback": member["photo"]["fallback"],
+                            "variants": member["photo"]["variants"] if member["photo"]["variants"] else [],
+                        }
+                        if member["photo"] is not None
+                        else None
+                    ),
                 }
                 for member in section["members"]
             ],

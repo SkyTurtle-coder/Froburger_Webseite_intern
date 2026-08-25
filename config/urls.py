@@ -1,9 +1,18 @@
 from django.conf import settings
 from django.contrib import admin
 from django.conf.urls.static import static
-from django.contrib.auth.views import LogoutView, PasswordChangeDoneView, PasswordChangeView
-from django.urls import include, path
+from django.contrib.auth.views import (
+    LogoutView,
+    PasswordChangeDoneView,
+    PasswordChangeView,
+    PasswordResetCompleteView,
+    PasswordResetConfirmView,
+    PasswordResetDoneView,
+    PasswordResetView,
+)
+from django.urls import include, path, reverse_lazy
 
+from accounts.forms import PortalPasswordResetForm
 from accounts.public_views import v1_public_members_api
 from accounts.views import PortalLoginView
 from core.views import DashboardView, healthcheck_view
@@ -35,14 +44,42 @@ urlpatterns = [
     path("api/v1/public/members/", v1_public_members_api, name="api-v1-public-members"),
     path("accounts/login/", PortalLoginView.as_view(), name="login"),
     path("accounts/logout/", LogoutView.as_view(), name="logout"),
+    path(
+        "accounts/password_reset/",
+        PasswordResetView.as_view(
+            form_class=PortalPasswordResetForm,
+            template_name="registration/password_reset_form.html",
+            email_template_name="registration/password_reset_email.txt",
+            subject_template_name="registration/password_reset_subject.txt",
+            success_url=reverse_lazy("password_reset_done"),
+        ),
+        name="password_reset",
+    ),
+    path(
+        "accounts/password_reset/done/",
+        PasswordResetDoneView.as_view(template_name="registration/password_reset_done.html"),
+        name="password_reset_done",
+    ),
+    path(
+        "accounts/reset/<uidb64>/<token>/",
+        PasswordResetConfirmView.as_view(
+            template_name="registration/password_reset_confirm.html",
+            success_url=reverse_lazy("password_reset_complete"),
+        ),
+        name="password_reset_confirm",
+    ),
+    path(
+        "accounts/reset/done/",
+        PasswordResetCompleteView.as_view(template_name="registration/password_reset_complete.html"),
+        name="password_reset_complete",
+    ),
     path("accounts/password_change/", PasswordChangeView.as_view(), name="password_change"),
     path("accounts/password_change/done/", PasswordChangeDoneView.as_view(), name="password_change_done"),
-    # SEC-007: django.contrib.auth.urls also bundles password_reset/*, which
-    # this project deliberately does not offer (no EMAIL_BACKEND is
-    # configured, and account resets are handled by an ADMIN, not
-    # self-service) - the templates for that flow don't exist either, so
-    # leaving those routes wired up meant they 500'd for anyone who found
-    # them. Only including the routes actually implemented and tested.
+    # SEC-007 follow-up: the original password-reset URLs were removed while
+    # the flow was half-wired (no templates, no tested mail configuration).
+    # These routes are now reintroduced explicitly with project templates,
+    # mail settings and reset throttling instead of enabling the whole
+    # django.contrib.auth.urls bundle wholesale.
     path("accounts/", include("accounts.urls")),
     path("anlaesse/", include("events.urls")),
     path("dokumente/", include("documents.urls")),

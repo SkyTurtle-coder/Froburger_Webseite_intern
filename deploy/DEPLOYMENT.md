@@ -30,6 +30,14 @@ Pflichtig:
 - `DB_PASSWORD`
 - `DB_HOST=127.0.0.1`
 - `DB_PORT=3306`
+- `EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend`
+- `EMAIL_HOST=mail.infomaniak.com`
+- `EMAIL_PORT=587`
+- `EMAIL_HOST_USER=noreply@intern-avfroburger.ch`
+- `EMAIL_HOST_PASSWORD`
+- `EMAIL_USE_TLS=True`
+- `DEFAULT_FROM_EMAIL="AV Froburger Intern <noreply@intern-avfroburger.ch>"`
+- `PASSWORD_RESET_TIMEOUT=7200`
 - `STATIC_ROOT=/srv/avf-intern/static`
 - `MEDIA_ROOT=/srv/avf-intern/media`
 - `PUBLIC_EVENT_SIGNUP_SHARED_SECRET` - shared secret for the WordPress -> Django
@@ -100,6 +108,16 @@ sudo nginx -t
 sudo systemctl status avf-intern
 sudo ss -ltnp
 ```
+
+## Passwort-Reset Smoke-Test
+
+1. Passwort-Reset fuer ein bekanntes Testkonto anfordern.
+2. E-Mail empfangen und `From` auf `AV Froburger Intern <noreply@intern-avfroburger.ch>` pruefen.
+3. Pruefen, dass der Link mit `https://intern.avfroburger.ch/accounts/reset/` beginnt.
+4. Reset-Link oeffnen und ein neues Passwort setzen.
+5. Login mit dem neuen Passwort pruefen.
+6. Login mit dem alten Passwort pruefen; er muss fehlschlagen.
+7. `journalctl -u avf-intern` und gegebenenfalls Nginx-Logs auf Fehler pruefen.
 
 ## Rollback
 

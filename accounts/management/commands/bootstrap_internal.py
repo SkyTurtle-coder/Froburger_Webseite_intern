@@ -1,5 +1,6 @@
 import getpass
 import os
+import secrets
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
@@ -20,7 +21,6 @@ class Command(BaseCommand):
     help = "Legt Rollen und optional einen initialen Admin-Benutzer an."
 
     def add_arguments(self, parser):
-        parser.add_argument("--username", type=str, help="Benutzername des initialen Admins")
         parser.add_argument("--email", type=str, default="", help="E-Mail des initialen Admins")
         parser.add_argument("--first-name", type=str, default="Admin", help="Vorname des initialen Admins")
         parser.add_argument("--last-name", type=str, default="Benutzer", help="Nachname des initialen Admins")
@@ -37,8 +37,8 @@ class Command(BaseCommand):
             Role.objects.get_or_create(code=code)
         self.stdout.write(self.style.SUCCESS("Rollen sichergestellt."))
 
-        username = options.get("username")
-        if not username:
+        email = options["email"].strip()
+        if not email:
             self.stdout.write("Kein Admin-Benutzer angefordert.")
             return
 
@@ -49,19 +49,20 @@ class Command(BaseCommand):
             )
 
         User = get_user_model()
-        user, created = User.objects.get_or_create(
-            username=username,
-            defaults={
-                "email": options["email"],
-                "is_staff": True,
-                "is_superuser": True,
-            },
-        )
+        user = User.objects.filter(email__iexact=email).first()
+        created = user is None
+        if created:
+            user = User(
+                username=f"mitglied-{secrets.token_hex(16)}",
+                email=email,
+                is_staff=True,
+                is_superuser=True,
+            )
 
         if created:
             user.set_password(password)
         else:
-            user.email = options["email"] or user.email
+            user.email = email
             user.is_staff = True
             user.is_superuser = True
             if password:
@@ -75,4 +76,4 @@ class Command(BaseCommand):
         profile.save()
         profile.roles.set(Role.objects.filter(code="ADMIN"))
 
-        self.stdout.write(self.style.SUCCESS(f"Admin-Benutzer '{username}' bereit."))
+        self.stdout.write(self.style.SUCCESS(f"Admin-Benutzer für {email} bereit."))

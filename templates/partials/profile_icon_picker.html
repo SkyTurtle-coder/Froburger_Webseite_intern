@@ -1,0 +1,24 @@
+{% load static %}
+<fieldset class="profile-icon-picker">
+    <legend>{{ field.label }}</legend>
+    {% for choice in field %}
+    <label class="profile-icon-picker__option">
+        {{ choice.tag }}
+        {% if choice.data.value == "bursch_f" %}
+        <span class="profile-icon-picker__preview"><img src="{% static 'images/profile-icons/Bursch_F-384.png' %}" alt="" width="384" height="384" class="profile-icon-picker__image"></span>
+        {% elif choice.data.value == "bursch_m" %}
+        <span class="profile-icon-picker__preview"><img src="{% static 'images/profile-icons/Bursch_M-384.png' %}" alt="" width="384" height="384" class="profile-icon-picker__image"></span>
+        {% elif choice.data.value == "fux_f" %}
+        <span class="profile-icon-picker__preview"><img src="{% static 'images/profile-icons/Fux_F-384.png' %}" alt="" width="384" height="384" class="profile-icon-picker__image"></span>
+        {% elif choice.data.value == "fux_m" %}
+        <span class="profile-icon-picker__preview"><img src="{% static 'images/profile-icons/Fux_M-384.png' %}" alt="" width="384" height="384" class="profile-icon-picker__image"></span>
+        {% elif choice.data.value == "fuxmajor_f" %}
+        <span class="profile-icon-picker__preview"><img src="{% static 'images/profile-icons/FM_F-384.png' %}" alt="" width="384" height="384" class="profile-icon-picker__image"></span>
+        {% elif choice.data.value == "fuxmajor_m" %}
+        <span class="profile-icon-picker__preview"><img src="{% static 'images/profile-icons/FM_M-384.png' %}" alt="" width="384" height="384" class="profile-icon-picker__image"></span>
+        {% endif %}
+        <span>{{ choice.choice_label }}</span>
+    </label>
+    {% endfor %}
+    {% if field.errors %}<span class="field__error">{{ field.errors|join:", " }}</span>{% endif %}
+</fieldset>

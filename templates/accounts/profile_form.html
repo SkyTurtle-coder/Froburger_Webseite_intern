@@ -16,6 +16,7 @@
             <p class="section-kicker">Persönliche Angaben</p>
             <div class="profile-form__grid">
                 {% include "partials/form_field.html" with field=form.photo %}
+                {% include "partials/profile_icon_picker.html" with field=form.avatar_icon %}
                 {% include "partials/form_field.html" with field=form.first_name %}
                 {% include "partials/form_field.html" with field=form.last_name %}
                 {% include "partials/form_field.html" with field=form.vulgo %}

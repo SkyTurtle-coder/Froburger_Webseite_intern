@@ -1,4 +1,4 @@
-﻿import hashlib
+import hashlib
 import secrets
 
 from django.conf import settings
@@ -27,6 +27,14 @@ class Role(models.Model):
 
 
 class Profile(models.Model):
+    class AvatarIcon(models.TextChoices):
+        BURSCH_F = "bursch_f", "Bursch (F)"
+        BURSCH_M = "bursch_m", "Bursch (M)"
+        FUX_F = "fux_f", "Fux (F)"
+        FUX_M = "fux_m", "Fux (M)"
+        FUXMAJOR_F = "fuxmajor_f", "Fuxmajor (F)"
+        FUXMAJOR_M = "fuxmajor_m", "Fuxmajor (M)"
+
     class Semester(models.TextChoices):
         FRUEHLINGSSEMESTER = "FS", "FS"
         HERBSTSEMESTER = "HS", "HS"
@@ -38,6 +46,7 @@ class Profile(models.Model):
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     photo = models.ImageField(upload_to="avatars/", blank=True)
+    avatar_icon = models.CharField(max_length=16, choices=AvatarIcon.choices, blank=True)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
     vulgo = models.CharField(max_length=150, blank=True)
@@ -97,7 +106,12 @@ class Profile(models.Model):
         return self.has_any_role("ADMIN", "WEB_X")
 
     def can_access_sensitive_documents(self):
-        return self.has_any_role("ADMIN", "BURSCH", "ALTFROBURGER")
+        return self.has_any_role(
+            "ADMIN",
+            "BURSCH",
+            "ALTFROBURGER",
+            "EHRENPHILISTER",
+        )
 
     def can_upload_sensitive_documents(self):
         return self.can_access_sensitive_documents()
@@ -139,7 +153,7 @@ class Profile(models.Model):
         if not self.entry_term_display:
             return ""
         if self.exit_term_display:
-            return f"{self.entry_term_display} â€“ {self.exit_term_display}"
+            return f"{self.entry_term_display} - {self.exit_term_display}"
         return f"seit {self.entry_term_display}"
 
     @property
@@ -200,7 +214,7 @@ class Profile(models.Model):
         year_value = getattr(self, year_field)
         semester_value = getattr(self, semester_field)
         if bool(year_value) != bool(semester_value):
-            message = f"{label}sjahr und {label.lower()}ssemester mÃ¼ssen gemeinsam gesetzt oder gemeinsam leer sein."
+            message = f"{label}sjahr und {label.lower()}ssemester müssen gemeinsam gesetzt oder gemeinsam leer sein."
             errors[year_field] = message
             errors[semester_field] = message
 
@@ -299,7 +313,7 @@ class CalendarSubscription(models.Model):
         ordering = ["-created_at", "-pk"]
 
     def __str__(self):
-        return f"Calendar subscription #{self.pk} for {self.user.username}"
+        return f"Calendar subscription #{self.pk} for {self.user.profile.display_name}"
 
     @property
     def is_active(self):
@@ -320,4 +334,3 @@ class CalendarSubscription(models.Model):
             token_hint=raw_token[-8:],
         )
         return subscription, raw_token
-

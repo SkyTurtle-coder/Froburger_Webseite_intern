@@ -10,12 +10,15 @@
             <h2>Verwaltung</h2>
             <p class="panel__lead">{{ profile_count }} Profile, {{ admin_count }} Admin</p>
         </div>
-        <a href="{% url 'user-create' %}" class="button">Mitglied anlegen</a>
+        <div class="button-row">
+            <a href="{% url 'user-create' %}" class="button">Mitglied anlegen</a>
+            <a href="{% url 'member-import' %}" class="button button--ghost">CSV importieren</a>
+        </div>
     </div>
     <form method="get" class="filter-bar">
         <div class="field">
             <label for="id_q">Suche</label>
-            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Name, Vulgo oder Benutzername">
+            <input id="id_q" type="search" name="q" value="{{ active_query }}" placeholder="Name, Vulgo oder E-Mail-Adresse">
         </div>
         <div class="field">
             <label for="id_role">Rolle</label>
@@ -36,7 +39,7 @@
         <article class="person-card">
             <div>
                 <h3><a href="{% url 'profile-detail' profile.pk %}" class="text-link">{{ profile.display_name }}</a></h3>
-                <p>{{ profile.user.username }}{% if profile.user.email %} · {{ profile.user.email }}{% endif %}</p>
+                <p>{{ profile.user.email|default:"Keine E-Mail-Adresse hinterlegt" }}</p>
             </div>
             <p>{% for role in profile.roles.all %}{% if not forloop.first %}, {% endif %}{{ role }}{% empty %}Keine Rolle{% endfor %}</p>
         </article>

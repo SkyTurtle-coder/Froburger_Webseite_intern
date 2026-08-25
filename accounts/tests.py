@@ -1,11 +1,15 @@
 ﻿import io
 import tempfile
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from textwrap import dedent
 from unittest import skip
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -15,12 +19,15 @@ from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test.utils import override_settings
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from django.utils import timezone
 from PIL import Image
 
 from accounts import throttling
 from accounts.auth_backends import EmailOrVulgoBackend
+from accounts.forms import UserWithProfileCreationForm
 from accounts.management.commands.sync_public_members_page import validate_public_member_media_urls
 from accounts.models import MemorialEntry, Profile, Role
 from accounts.public_members import build_public_members_payload, is_public_member
@@ -37,17 +44,19 @@ class PermissionFlowTests(TestCase):
         cls.bursch_role = Role.objects.get(code="BURSCH")
         cls.altfroburger_role = Role.objects.get(code="ALTFROBURGER")
         cls.af_president_role = Role.objects.get(code="AF_PRAESIDENT")
+        cls.af_beisitzer_role = Role.objects.get(code="AF_BEISITZER")
+        cls.af_totenfeiern_role = Role.objects.get(code="AF_TOTENFEIERN")
 
-        cls.admin = User.objects.create_user(username="admin", password="testpass123")
+        cls.admin = User.objects.create_user(username="admin", email="admin@example.com", password="testpass123")
         cls.admin.profile.roles.add(cls.admin_role)
 
-        cls.webx = User.objects.create_user(username="webx", password="testpass123")
+        cls.webx = User.objects.create_user(username="webx", email="webx@example.com", password="testpass123")
         cls.webx.profile.roles.add(cls.webx_role)
 
         cls.bursch = User.objects.create_user(username="bursch", password="testpass123")
         cls.bursch.profile.roles.add(cls.bursch_role)
 
-        cls.member = User.objects.create_user(username="member", password="testpass123")
+        cls.member = User.objects.create_user(username="member", email="member@example.com", password="testpass123")
 
         cls.af_member = User.objects.create_user(username="afmember", password="testpass123")
         cls.af_member.profile.first_name = "Anton"
@@ -55,6 +64,20 @@ class PermissionFlowTests(TestCase):
         cls.af_member.profile.vulgo = "Cerevis"
         cls.af_member.profile.save()
         cls.af_member.profile.roles.add(cls.altfroburger_role, cls.af_president_role)
+
+        cls.af_beisitzer = User.objects.create_user(username="afbeisitzer", password="testpass123")
+        cls.af_beisitzer.profile.first_name = "Bruno"
+        cls.af_beisitzer.profile.last_name = "Beisitz"
+        cls.af_beisitzer.profile.vulgo = "Laterne"
+        cls.af_beisitzer.profile.save()
+        cls.af_beisitzer.profile.roles.add(cls.af_beisitzer_role)
+
+        cls.af_totenfeiern = User.objects.create_user(username="aftotenfeiern", password="testpass123")
+        cls.af_totenfeiern.profile.first_name = "Theo"
+        cls.af_totenfeiern.profile.last_name = "Toten"
+        cls.af_totenfeiern.profile.vulgo = "Ceremon"
+        cls.af_totenfeiern.profile.save()
+        cls.af_totenfeiern.profile.roles.add(cls.af_totenfeiern_role)
 
         cls.general_folder = DocumentFolder.objects.create(name="Allgemein", scope=FolderScope.GENERAL)
         cls.sensitive_folder = DocumentFolder.objects.create(name="Sensibel", scope=FolderScope.SENSITIVE)
@@ -120,8 +143,8 @@ class PermissionFlowTests(TestCase):
         self.client.login(username="member", password="testpass123")
         response = self.client.get(reverse("member-directory"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.admin.username)
-        self.assertContains(response, self.member.username)
+        self.assertContains(response, self.admin.email)
+        self.assertContains(response, self.member.email)
 
     def test_member_cannot_access_events(self):
         self.client.login(username="member", password="testpass123")
@@ -156,6 +179,25 @@ class PermissionFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.sensitive_document.title)
 
+    def test_sensitive_documents_hidden_from_af_beisitzer(self):
+        self.client.login(username="afbeisitzer", password="testpass123")
+        response = self.client.get(reverse("document-scope", kwargs={"scope": "sensitive"}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_sensitive_documents_hidden_from_af_totenfeiern(self):
+        self.client.login(username="aftotenfeiern", password="testpass123")
+        response = self.client.get(reverse("document-scope", kwargs={"scope": "sensitive"}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_af_committee_display_roles_do_not_grant_admin_permissions(self):
+        for user in (self.af_beisitzer, self.af_totenfeiern):
+            with self.subTest(username=user.username):
+                profile = user.profile
+                self.assertFalse(profile.can_manage_roles())
+                self.assertFalse(profile.can_manage_events())
+                self.assertFalse(profile.can_access_sensitive_documents())
+                self.assertFalse(profile.can_upload_sensitive_documents())
+
     def test_sensitive_download_blocked_for_member(self):
         self.client.login(username="member", password="testpass123")
         response = self.client.get(reverse("document-download", kwargs={"pk": self.sensitive_document.pk}))
@@ -170,8 +212,8 @@ class PermissionFlowTests(TestCase):
         self.client.login(username="admin", password="testpass123")
         response = self.client.get(reverse("profile-list"), {"role": "WEB_X"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.webx.username)
-        self.assertNotContains(response, self.member.username)
+        self.assertContains(response, self.webx.email)
+        self.assertNotContains(response, self.member.email)
 
     def test_admin_profile_form_renders_roles_as_checkboxes(self):
         self.client.login(username="admin", password="testpass123")
@@ -242,6 +284,55 @@ class PermissionFlowTests(TestCase):
         self.client.logout()
         self.assertTrue(self.client.login(username="member", password="NeuesPasswort123!"))
 
+    def test_admin_can_access_admin_password_reset_form(self):
+        self.client.login(username="admin", password="testpass123")
+
+        response = self.client.get(reverse("profile-password-reset", kwargs={"pk": self.member.profile.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Passwort zurücksetzen")
+        self.assertContains(response, self.member.email)
+
+    def test_admin_can_reset_another_users_password(self):
+        self.client.login(username="admin", password="testpass123")
+
+        response = self.client.post(
+            reverse("profile-password-reset", kwargs={"pk": self.member.profile.pk}),
+            {
+                "new_password1": "AdminReset123!",
+                "new_password2": "AdminReset123!",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Passwort für member - wurde zurückgesetzt.")
+        self.client.logout()
+        self.assertTrue(self.client.login(username="member", password="AdminReset123!"))
+
+    def test_non_admin_cannot_access_admin_password_reset_form(self):
+        self.client.login(username="member", password="testpass123")
+
+        response = self.client.get(reverse("profile-password-reset", kwargs={"pk": self.admin.profile.pk}))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_password_reset_form_requires_matching_passwords(self):
+        self.client.login(username="admin", password="testpass123")
+
+        response = self.client.post(
+            reverse("profile-password-reset", kwargs={"pk": self.member.profile.pk}),
+            {
+                "new_password1": "AdminReset123!",
+                "new_password2": "AnderesPasswort123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(response.context["form"], "new_password2", "Die beiden Passwörter sind nicht identisch.")
+        self.client.logout()
+        self.assertTrue(self.client.login(username="member", password="testpass123"))
+
     def test_public_members_api_includes_af_committee_and_altfroburger_sections(self):
         response = self.client.get(reverse("api-v1-public-members"))
         self.assertEqual(response.status_code, 200)
@@ -259,12 +350,169 @@ class PermissionFlowTests(TestCase):
         anton = next(member for member in af_members if member["display_name"] == "Anton Froburger")
         self.assertEqual([role["label"] for role in anton["roles"]], ["AF-Präsident"])
 
+        self.assertTrue(any(member["display_name"] == "Bruno Beisitz" for member in af_members))
+        bruno = next(member for member in af_members if member["display_name"] == "Bruno Beisitz")
+        self.assertEqual([role["label"] for role in bruno["roles"]], ["AF-Beisitzer"])
+
+        self.assertTrue(any(member["display_name"] == "Theo Toten" for member in af_members))
+        theo = next(member for member in af_members if member["display_name"] == "Theo Toten")
+        self.assertEqual([role["label"] for role in theo["roles"]], ["Beauftragter für Totenfeiern"])
+
+
+class MemberCsvImportTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        admin_role = Role.objects.get(code="ADMIN")
+        cls.admin = User.objects.create_user(username="csv-admin", password="testpass123")
+        cls.admin.profile.roles.add(admin_role)
+        cls.member = User.objects.create_user(username="csv-member", password="testpass123")
+
+        User.objects.create_user(
+            username="existing-email",
+            email="vorhanden@example.com",
+            password="testpass123",
+        )
+        cls.existing_profile = User.objects.create_user(
+            username="existing-profile",
+            email="alt@example.com",
+            password="testpass123",
+        )
+        cls.existing_profile.profile.first_name = "Hans"
+        cls.existing_profile.profile.last_name = "Muster"
+        cls.existing_profile.profile.vulgo = "Fux"
+        cls.existing_profile.profile.save()
+
+    @staticmethod
+    def _csv_upload(content):
+        return SimpleUploadedFile("mitglieder.csv", content.encode("utf-8"), content_type="text/csv")
+
+    def test_only_admin_can_access_csv_import(self):
+        self.client.login(username="csv-member", password="testpass123")
+
+        response = self.client.get(reverse("member-import"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_sees_csv_import_button_on_profile_list(self):
+        self.client.login(username="csv-admin", password="testpass123")
+
+        response = self.client.get(reverse("profile-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("member-import"))
+        self.assertContains(response, "CSV importieren")
+
+    def test_manual_member_creation_uses_anonymous_internal_username(self):
+        form = UserWithProfileCreationForm(
+            data={
+                "email": "manual@example.com",
+                "first_name": "Manuel",
+                "last_name": "Beispiel",
+                "vulgo": "Muster",
+                "password1": "SicheresTestpasswort123!",
+                "password2": "SicheresTestpasswort123!",
+            }
+        )
+
+        self.assertNotIn("username", form.fields)
+        self.assertTrue(form.is_valid(), form.errors)
+        user = form.save()
+
+        self.assertEqual(user.email, "manual@example.com")
+        self.assertTrue(user.username.startswith("mitglied-"))
+
+    def test_csv_import_creates_only_new_members_and_reports_skipped_rows(self):
+        self.client.login(username="csv-admin", password="testpass123")
+        upload = self._csv_upload(
+            "Namen;Vornamen;Vulo;Emailadresse;Status\n"
+            "Neu;Nora;Aster;nora@example.com;Aktivitas\n"
+            "Andere;Anna;Test;vorhanden@example.com;Aktivitas\n"
+            "Muster;Hans;Fux;hans-neu@example.com;Alt-Froburger\n"
+            "Neu;Nora;Aster;nora-nochmals@example.com;Aktivitas\n"
+            "Ohne;Email;Leer;;Aktivitas\n"
+        )
+
+        response = self.client.post(reverse("member-import"), {"csv_file": upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1 Mitglieder angelegt.")
+        self.assertContains(response, "1 Mitglieder aktualisiert.")
+        self.assertContains(response, "2 Duplikate übersprungen.")
+        self.assertContains(response, "1 fehlerhafte Zeilen übersprungen.")
+
+        imported_user = User.objects.get(email="nora@example.com")
+        self.assertFalse(imported_user.has_usable_password())
+        self.assertEqual(imported_user.profile.first_name, "Nora")
+        self.assertEqual(imported_user.profile.last_name, "Neu")
+        self.assertEqual(imported_user.profile.vulgo, "Aster")
+        self.assertFalse(User.objects.filter(email="hans-neu@example.com").exists())
+        self.assertFalse(User.objects.filter(email="nora-nochmals@example.com").exists())
+
+    def test_csv_import_assigns_roles_for_altfroburger_and_ehrenphilister(self):
+        self.client.login(username="csv-admin", password="testpass123")
+        upload = self._csv_upload(
+            "Namen;Vornamen;Vulo;Emailadresse;Status\n"
+            "Alt;Anna;Aster;anna.alt@example.com;Alt-Froburger\n"
+            "Ehre;Emil;Honor;emil.ehre@example.com;Ehrenphilister\n"
+        )
+
+        response = self.client.post(reverse("member-import"), {"csv_file": upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(User.objects.get(email="anna.alt@example.com").profile.has_role("ALTFROBURGER"))
+        honorary_profile = User.objects.get(email="emil.ehre@example.com").profile
+        self.assertTrue(honorary_profile.has_role("EHRENPHILISTER"))
+        self.assertTrue(honorary_profile.can_access_sensitive_documents())
+        self.assertTrue(honorary_profile.can_upload_sensitive_documents())
+
+    def test_csv_import_adds_role_to_existing_member(self):
+        self.client.login(username="csv-admin", password="testpass123")
+        upload = self._csv_upload(
+            "Namen;Vornamen;Vulo;Emailadresse;Status\n"
+            "Muster;Hans;Fux;alt@example.com;Ehrenphilister\n"
+        )
+
+        response = self.client.post(reverse("member-import"), {"csv_file": upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1 Mitglieder aktualisiert.")
+        self.existing_profile.profile.refresh_from_db()
+        self.assertTrue(self.existing_profile.profile.has_role("EHRENPHILISTER"))
+
+    def test_csv_import_rejects_unknown_status(self):
+        self.client.login(username="csv-admin", password="testpass123")
+        upload = self._csv_upload(
+            "Namen;Vornamen;Vulo;Emailadresse;Status\nNeu;Nora;Aster;nora@example.com;Unbekannt\n"
+        )
+
+        response = self.client.post(reverse("member-import"), {"csv_file": upload})
+
+        self.assertContains(response, "Unbekannter Status")
+        self.assertFalse(User.objects.filter(email="nora@example.com").exists())
+
+    def test_csv_import_rejects_missing_required_headers(self):
+        self.client.login(username="csv-admin", password="testpass123")
+        upload = self._csv_upload("Name;Vorname;Emailadresse;Status\nNeu;Nora;nora@example.com;Aktivitas\n")
+
+        response = self.client.post(reverse("member-import"), {"csv_file": upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["form"],
+            "csv_file",
+            "Die CSV braucht Spalten für Name, Vorname, Vulgo, E-Mail-Adresse und Status.",
+        )
+        self.assertFalse(User.objects.filter(email="nora@example.com").exists())
+
 
 @override_settings(PUBLIC_MEDIA_BASE_URL="https://media.avfroburger.test/media/")
 class PublicMembersPayloadTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.senior_role = Role.objects.get(code="SENIOR")
+        cls.quaestor_role = Role.objects.get(code="QUAESTOR")
+        cls.af_beisitzer_role = Role.objects.get(code="AF_BEISITZER")
+        cls.af_totenfeiern_role = Role.objects.get(code="AF_TOTENFEIERN")
         cls.webx_role = Role.objects.get(code="WEB_X")
         cls.bursch_role = Role.objects.get(code="BURSCH")
 
@@ -300,6 +548,32 @@ class PublicMembersPayloadTests(TestCase):
         cls.deceased_user.profile.save()
         cls.deceased_user.profile.roles.add(cls.bursch_role)
 
+        cls.inactive_user = User.objects.create_user(username="inactivemember", password="testpass123")
+        cls.inactive_user.profile.first_name = "Sina"
+        cls.inactive_user.profile.last_name = "Still"
+        cls.inactive_user.profile.exit_year = 2026
+        cls.inactive_user.profile.exit_semester = Profile.Semester.FRUEHLINGSSEMESTER
+        cls.inactive_user.profile.save()
+        cls.inactive_user.profile.roles.add(cls.bursch_role)
+
+        cls.quaestor_user = User.objects.create_user(username="quaestor", password="testpass123")
+        cls.quaestor_user.profile.first_name = "Quentin"
+        cls.quaestor_user.profile.last_name = "Kasse"
+        cls.quaestor_user.profile.save()
+        cls.quaestor_user.profile.roles.add(cls.quaestor_role)
+
+        cls.af_beisitzer_user = User.objects.create_user(username="afpublicbeisitz", password="testpass123")
+        cls.af_beisitzer_user.profile.first_name = "Bruno"
+        cls.af_beisitzer_user.profile.last_name = "Beisitz"
+        cls.af_beisitzer_user.profile.save()
+        cls.af_beisitzer_user.profile.roles.add(cls.af_beisitzer_role)
+
+        cls.af_totenfeiern_user = User.objects.create_user(username="afpublictoten", password="testpass123")
+        cls.af_totenfeiern_user.profile.first_name = "Theo"
+        cls.af_totenfeiern_user.profile.last_name = "Toten"
+        cls.af_totenfeiern_user.profile.save()
+        cls.af_totenfeiern_user.profile.roles.add(cls.af_totenfeiern_role)
+
     def setUp(self):
         cache.clear()  # avoid SEC-013's per-IP rate limit tripping across tests in this class
 
@@ -315,11 +589,11 @@ class PublicMembersPayloadTests(TestCase):
 
         payload = response.json()
         committee_member = payload["sections"]["committee"]["members"][0]
-        self.assertTrue(committee_member["photo"]["fallback"])
+        self.assertIsNone(committee_member["photo"])
 
     def test_payload_has_schema_version_and_content_hash(self):
         payload = build_public_members_payload()
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertIn("generated_at", payload)
         self.assertRegex(payload["content_hash"], r"^[0-9a-f]{64}$")
 
@@ -327,11 +601,34 @@ class PublicMembersPayloadTests(TestCase):
         payload = build_public_members_payload()
         members = payload["sections"]["committee"]["members"]
 
-        self.assertEqual(len(members), 1)
-        self.assertEqual(members[0]["display_name"], "Max Muster")
+        max_member = next(member for member in members if member["display_name"] == "Max Muster")
         self.assertEqual(
-            [role["label"] for role in members[0]["roles"]],
+            [role["label"] for role in max_member["roles"]],
             ["Senior"],
+        )
+
+    def test_quaestor_role_is_exposed_as_quaestor_with_umlaut(self):
+        payload = build_public_members_payload()
+        member = next(member for member in payload["sections"]["committee"]["members"] if member["display_name"] == "Quentin Kasse")
+
+        self.assertEqual([role["label"] for role in member["roles"]], ["Quästor"])
+
+    def test_af_committee_roles_are_exposed_with_human_labels(self):
+        payload = build_public_members_payload()
+        af_committee_members = payload["sections"]["af_committee"]["members"]
+
+        bruno = next(member for member in af_committee_members if member["display_name"] == "Bruno Beisitz")
+        theo = next(member for member in af_committee_members if member["display_name"] == "Theo Toten")
+
+        self.assertEqual([role["label"] for role in bruno["roles"]], ["AF-Beisitzer"])
+        self.assertEqual([role["label"] for role in theo["roles"]], ["Beauftragter für Totenfeiern"])
+
+    def test_public_payload_keeps_expected_section_order(self):
+        payload = build_public_members_payload()
+
+        self.assertEqual(
+            payload["section_order"],
+            ["committee", "salon", "stall", "altfroburger", "af_committee"],
         )
 
     def test_public_payload_includes_only_expected_profile_fields_for_flip_backside(self):
@@ -383,12 +680,52 @@ class PublicMembersPayloadTests(TestCase):
 
         self.assertNotIn("Vera Vergangen", all_names)
 
-    def test_member_without_photo_uses_photo_fallback(self):
+    def test_inactive_profiles_are_not_exposed_in_public_members_payload(self):
+        payload = build_public_members_payload()
+        all_names = [
+            member["display_name"]
+            for section in payload["sections"].values()
+            for member in section["members"]
+        ]
+
+        self.assertNotIn("Sina Still", all_names)
+
+    def test_member_without_photo_uses_initials_fallback(self):
         payload = build_public_members_payload()
         salon_members = payload["sections"]["salon"]["members"]
         member = next(member for member in salon_members if member["display_name"] == "Nina Ohnebild")
-        self.assertTrue(member["photo"]["fallback"])
-        self.assertEqual(member["photo"]["variants"], {})
+        self.assertIsNone(member["photo"])
+        self.assertIsNone(member["avatar_icon"])
+
+    def test_valid_avatar_icon_is_exported_without_a_photo(self):
+        self.committee_user.profile.avatar_icon = Profile.AvatarIcon.FUXMAJOR_M
+        self.committee_user.profile.save()
+
+        payload = build_public_members_payload()
+        member = next(member for member in payload["sections"]["committee"]["members"] if member["display_name"] == "Max Muster")
+
+        self.assertEqual(member["avatar_icon"], Profile.AvatarIcon.FUXMAJOR_M)
+        self.assertIsNone(member["photo"])
+
+    def test_invalid_avatar_icon_is_not_exported(self):
+        Profile.objects.filter(pk=self.committee_user.profile.pk).update(avatar_icon="../../untrusted.png")
+
+        payload = build_public_members_payload()
+        member = next(member for member in payload["sections"]["committee"]["members"] if member["display_name"] == "Max Muster")
+
+        self.assertIsNone(member["avatar_icon"])
+
+    def test_avatar_icon_change_updates_content_hash(self):
+        before = build_public_members_payload()["content_hash"]
+        self.committee_user.profile.avatar_icon = Profile.AvatarIcon.FUX_M
+        self.committee_user.profile.save()
+        after_first_change = build_public_members_payload()["content_hash"]
+        self.committee_user.profile.avatar_icon = Profile.AvatarIcon.BURSCH_M
+        self.committee_user.profile.save()
+        after_second_change = build_public_members_payload()["content_hash"]
+
+        self.assertNotEqual(before, after_first_change)
+        self.assertNotEqual(after_first_change, after_second_change)
 
 
 class PublicMembersApiRateLimitTests(TestCase):
@@ -477,7 +814,7 @@ class PublicMemberPhotoDerivativeTests(TestCase):
             member = next(
                 member for member in payload["sections"]["salon"]["members"] if member["display_name"] == "Bea Broken"
             )
-            self.assertTrue(member["photo"]["fallback"])
+            self.assertIsNone(member["photo"])
 
     @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/", ALLOWED_HOSTS=["testserver", "evil.example.test"])
     def test_photo_urls_remain_on_configured_public_domain_even_with_different_host(self):
@@ -543,6 +880,21 @@ class PublicMemberMediaLifecycleTests(TestCase):
         profile.refresh_from_db()
         self.assertFalse(is_public_member(profile))
 
+    def test_is_public_member_excludes_inactive_profiles(self):
+        user = User.objects.create_user(username="inactive-policy", password="testpass123")
+        profile = user.profile
+        profile.first_name = "Inactive"
+        profile.last_name = "Policy"
+        profile.roles.add(self.bursch_role)
+        self.assertTrue(is_public_member(profile))
+
+        profile.exit_year = 2026
+        profile.exit_semester = Profile.Semester.FRUEHLINGSSEMESTER
+        profile.save()
+        profile.refresh_from_db()
+
+        self.assertFalse(is_public_member(profile))
+
     @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
     def test_derivatives_are_purged_when_profile_becomes_deceased(self):
         with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
@@ -567,6 +919,33 @@ class PublicMemberMediaLifecycleTests(TestCase):
                 profile.save()
 
             self.assertFalse(derivative_dir.exists(), "public derivatives must be gone once the profile is deceased")
+            self.assertTrue(original_photo_path.exists(), "the original uploaded photo must never be deleted")
+
+    @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
+    def test_derivatives_are_purged_when_profile_becomes_inactive(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            user = User.objects.create_user(username="retired", password="testpass123")
+            profile = user.profile
+            profile.first_name = "Retired"
+            profile.last_name = "Member"
+            profile.roles.add(self.bursch_role)
+            profile.photo = SimpleUploadedFile("portrait.jpg", self._jpeg_bytes(), content_type="image/jpeg")
+            profile.save()
+
+            build_public_members_payload()
+            derivative_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            self.assertTrue(derivative_dir.exists())
+            self.assertGreater(len(list(derivative_dir.glob("*.webp"))), 0)
+
+            original_photo_path = Path(profile.photo.path)
+            self.assertTrue(original_photo_path.exists())
+
+            with self.captureOnCommitCallbacks(execute=True):
+                profile.exit_year = 2026
+                profile.exit_semester = Profile.Semester.FRUEHLINGSSEMESTER
+                profile.save()
+
+            self.assertFalse(derivative_dir.exists(), "public derivatives must be gone once the profile is inactive")
             self.assertTrue(original_photo_path.exists(), "the original uploaded photo must never be deleted")
 
     @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
@@ -614,6 +993,30 @@ class PublicMemberMediaLifecycleTests(TestCase):
                 profile.save()
 
             self.assertTrue(derivative_dir.exists(), "an unrelated profile edit must not purge a still-public member's photo")
+
+    @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
+    def test_selecting_avatar_icon_purges_public_photo_derivatives_without_deleting_original(self):
+        with override_settings(MEDIA_ROOT=self.temp_media_dir.name):
+            user = User.objects.create_user(username="icon-replaces-photo", password="testpass123")
+            profile = user.profile
+            profile.first_name = "Icon"
+            profile.last_name = "Replaces"
+            profile.roles.add(self.bursch_role)
+            profile.photo = SimpleUploadedFile("portrait.jpg", self._jpeg_bytes(), content_type="image/jpeg")
+            profile.save()
+
+            build_public_members_payload()
+            derivative_dir = Path(self.temp_media_dir.name) / "public" / "members" / str(profile.pk)
+            original_path = Path(profile.photo.path)
+            self.assertTrue(derivative_dir.exists())
+            self.assertTrue(original_path.exists())
+
+            with self.captureOnCommitCallbacks(execute=True):
+                profile.avatar_icon = Profile.AvatarIcon.FUX_M
+                profile.save()
+
+            self.assertFalse(derivative_dir.exists())
+            self.assertTrue(original_path.exists())
 
     @override_settings(PUBLIC_MEDIA_BASE_URL="https://intern.avfroburger.test/media/")
     def test_becoming_public_again_regenerates_derivatives_on_demand(self):
@@ -1005,18 +1408,47 @@ class LoginRateLimitingTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
 
-class PasswordResetRemovedAndSessionPolicyTests(TestCase):
-    """SEC-007: the half-wired password-reset flow (routes registered,
-    templates missing, no EMAIL_BACKEND) is removed rather than left to 500.
-    SEC-008: session lifetime is a deliberate, bounded idle timeout."""
+class PasswordResetAndSessionPolicyTests(TestCase):
+    """SEC-007/SEC-008: password reset is fully wired and sessions stay bounded."""
 
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="sessionuser", password="testpass123")
+        cls.user.email = "sessionuser@example.org"
+        cls.user.save(update_fields=["email"])
         cls.user.profile.vulgo = "SessionCheck"
         cls.user.profile.save()
+        cls.no_email_user = User.objects.create_user(username="noemailuser", password="testpass123")
+        cls.no_email_user.profile.vulgo = "NoMail"
+        cls.no_email_user.profile.save()
+        cls.inactive_user = User.objects.create_user(
+            username="inactive-reset-user",
+            email="inactive@example.org",
+            password="testpass123",
+            is_active=False,
+        )
+        cls.inactive_user.profile.vulgo = "InactiveReset"
+        cls.inactive_user.profile.save()
 
-    def test_password_reset_routes_are_gone_not_broken(self):
+    def setUp(self):
+        cache.clear()
+        mail.outbox = []
+
+    def _request_reset(self, email_address, **extra):
+        return self.client.post(reverse("password_reset"), {"email": email_address}, follow=True, **extra)
+
+    @staticmethod
+    def _extract_reset_link(message):
+        match = re.search(r"https?://\S+", message.body)
+        return match.group(0) if match else ""
+
+    def _issue_reset_mail(self, **request_kwargs):
+        response = self._request_reset(self.user.email, **request_kwargs)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        return response, mail.outbox[0], self._extract_reset_link(mail.outbox[0])
+
+    def test_password_reset_routes_are_available(self):
         for path in (
             "/accounts/password_reset/",
             "/accounts/password_reset/done/",
@@ -1025,22 +1457,183 @@ class PasswordResetRemovedAndSessionPolicyTests(TestCase):
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)
-                self.assertEqual(response.status_code, 404)
+                self.assertIn(response.status_code, {200, 302})
 
-    def test_no_reset_url_names_are_registered(self):
+    def test_password_reset_url_names_are_registered(self):
         for name in ("password_reset", "password_reset_done", "password_reset_confirm", "password_reset_complete"):
             with self.subTest(name=name):
-                with self.assertRaises(NoReverseMatch):
-                    reverse(name)
+                if name == "password_reset_confirm":
+                    self.assertTrue(reverse(name, kwargs={"uidb64": "abc", "token": "set-password"}))
+                else:
+                    self.assertTrue(reverse(name))
 
     def test_login_logout_and_password_change_still_work(self):
         self.assertTrue(reverse("login"))
         self.assertTrue(reverse("logout"))
+        self.assertTrue(reverse("password_reset"))
         self.assertTrue(reverse("password_change"))
         self.assertTrue(reverse("password_change_done"))
 
         login_response = self.client.post(reverse("login"), {"username": "SessionCheck", "password": "testpass123"})
         self.assertEqual(login_response.status_code, 302)
+
+    def test_known_and_unknown_addresses_share_same_confirmation_response(self):
+        known_response = self._request_reset(self.user.email)
+        unknown_response = self._request_reset("unknown@example.org")
+
+        self.assertContains(
+            known_response,
+            "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine Nachricht mit weiteren Anweisungen versendet.",
+        )
+        self.assertContains(
+            unknown_response,
+            "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine Nachricht mit weiteren Anweisungen versendet.",
+        )
+
+    def test_known_email_creates_one_reset_mail(self):
+        response = self._request_reset(self.user.email)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_unknown_email_does_not_create_reset_mail(self):
+        response = self._request_reset("unknown@example.org")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_user_without_email_gets_neutral_response_without_mail(self):
+        response = self._request_reset("noemailuser@example.org")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertContains(
+            response,
+            "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine Nachricht mit weiteren Anweisungen versendet.",
+        )
+
+    def test_inactive_user_does_not_receive_reset_mail(self):
+        response = self._request_reset(self.inactive_user.email)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(
+        ALLOWED_HOSTS=["testserver", "intern.avfroburger.ch", "internal.invalid"],
+        USE_X_FORWARDED_HOST=True,
+        SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+        DEFAULT_FROM_EMAIL="AV Froburger Intern <noreply@intern-avfroburger.ch>",
+    )
+    def test_reset_mail_uses_expected_from_route_and_https_domain(self):
+        _response, message, link = self._issue_reset_mail(
+            HTTP_HOST="internal.invalid",
+            HTTP_X_FORWARDED_HOST="intern.avfroburger.ch",
+            HTTP_X_FORWARDED_PROTO="https",
+        )
+
+        self.assertEqual(message.from_email, "AV Froburger Intern <noreply@intern-avfroburger.ch>")
+        self.assertEqual(message.subject, "AV Froburger Intern: Passwort zurücksetzen")
+        self.assertTrue(link.startswith("https://intern.avfroburger.ch/accounts/reset/"))
+
+    def test_valid_token_opens_password_reset_form(self):
+        _response, _message, link = self._issue_reset_mail()
+
+        confirm_response = self.client.get(link, follow=True)
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertContains(confirm_response, "Neues Passwort festlegen")
+        self.assertContains(confirm_response, 'name="new_password1"', html=False)
+
+    def test_invalid_token_shows_neutral_error_state(self):
+        invalid_url = reverse("password_reset_confirm", kwargs={"uidb64": "MQ", "token": "invalid-token"})
+
+        response = self.client.get(invalid_url, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Dieser Link ist ungültig oder abgelaufen.")
+
+    def test_expired_token_is_rejected(self):
+        token = default_token_generator.make_token(self.user)
+        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
+        url = reverse("password_reset_confirm", kwargs={"uidb64": uid, "token": token})
+        future = datetime.now() + timedelta(seconds=7201)
+
+        with patch.object(default_token_generator, "_now", return_value=future):
+            response = self.client.get(url, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Dieser Link ist ungültig oder abgelaufen.")
+
+    def test_password_can_be_reset_and_old_password_stops_working(self):
+        _response, _message, link = self._issue_reset_mail()
+
+        get_response = self.client.get(link, follow=True)
+        final_path = get_response.request["PATH_INFO"]
+
+        post_response = self.client.post(
+            final_path,
+            {
+                "new_password1": "ResetPasswort123!",
+                "new_password2": "ResetPasswort123!",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(post_response.status_code, 200)
+        self.assertContains(post_response, "Dein neues Passwort wurde gespeichert.")
+        self.client.logout()
+        self.assertFalse(self.client.login(username="sessionuser", password="testpass123"))
+        self.assertTrue(self.client.login(username="sessionuser", password="ResetPasswort123!"))
+
+    def test_used_token_cannot_be_reused(self):
+        _response, _message, link = self._issue_reset_mail()
+
+        get_response = self.client.get(link, follow=True)
+        final_path = get_response.request["PATH_INFO"]
+        self.client.post(
+            final_path,
+            {
+                "new_password1": "ResetPasswort123!",
+                "new_password2": "ResetPasswort123!",
+            },
+            follow=True,
+        )
+
+        reuse_response = self.client.get(link, follow=True)
+
+        self.assertEqual(reuse_response.status_code, 200)
+        self.assertContains(reuse_response, "Dieser Link ist ungültig oder abgelaufen.")
+
+    def test_multiple_reset_requests_send_multiple_mails_until_throttled(self):
+        for index in range(throttling.RESET_IDENTIFIER_MAX_ATTEMPTS):
+            response = self._request_reset(self.user.email)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(mail.outbox), index + 1)
+
+        throttled_response = self._request_reset(self.user.email)
+
+        self.assertEqual(throttled_response.status_code, 200)
+        self.assertEqual(len(mail.outbox), throttling.RESET_IDENTIFIER_MAX_ATTEMPTS)
+
+    def test_reset_rate_limit_leaks_no_account_existence(self):
+        for _ in range(throttling.RESET_IDENTIFIER_MAX_ATTEMPTS):
+            self._request_reset("unknown@example.org")
+
+        unknown_response = self._request_reset("unknown@example.org")
+        cache.clear()
+        mail.outbox = []
+        for _ in range(throttling.RESET_IDENTIFIER_MAX_ATTEMPTS):
+            self._request_reset(self.user.email)
+        known_response = self._request_reset(self.user.email)
+
+        self.assertContains(
+            unknown_response,
+            "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine Nachricht mit weiteren Anweisungen versendet.",
+        )
+        self.assertContains(
+            known_response,
+            "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine Nachricht mit weiteren Anweisungen versendet.",
+        )
 
     def test_session_cookie_age_matches_configured_idle_timeout(self):
         from django.conf import settings as django_settings
@@ -1048,22 +1641,26 @@ class PasswordResetRemovedAndSessionPolicyTests(TestCase):
         self.client.login(username="sessionuser", password="testpass123")
         self.assertEqual(self.client.session.get_expiry_age(), django_settings.SESSION_COOKIE_AGE)
 
-    def test_session_expiry_slides_forward_on_activity(self):
+    def test_session_cookie_is_reissued_on_every_request(self):
+        # SEC-008 verification note: an earlier version of this test compared
+        # session.get_expiry_date() across two requests. That's a false
+        # positive - Django computes get_expiry_date() dynamically from
+        # SESSION_COOKIE_AGE unless set_expiry() explicitly stored a fixed
+        # value in the session data (it never is here), so that comparison
+        # would advance identically even with SESSION_SAVE_EVERY_REQUEST=False
+        # or no session middleware behavior at all. The actual observable
+        # proof that a sliding idle timeout is in effect is whether the
+        # sessionid cookie gets a fresh Set-Cookie on a plain GET that
+        # doesn't otherwise touch session data - without
+        # SESSION_SAVE_EVERY_REQUEST, Django only re-sends the cookie when
+        # session data actually changes.
         self.client.login(username="sessionuser", password="testpass123")
-        first_expiry = self.client.session.get_expiry_date()
 
-        # Advance wall-clock time without a real sleep, then make another
-        # authenticated request - SESSION_SAVE_EVERY_REQUEST=True should push
-        # the expiry forward, proving this is a sliding idle timeout rather
-        # than a fixed expiry from login time.
-        from unittest.mock import patch
+        response = self.client.get(reverse("dashboard"))
 
-        later = timezone.now() + timedelta(minutes=30)
-        with patch("django.utils.timezone.now", return_value=later):
-            self.client.get(reverse("dashboard"))
-        second_expiry = self.client.session.get_expiry_date()
-
-        self.assertGreater(second_expiry, first_expiry)
+        self.assertIn("sessionid", response.cookies)
+        reissued_max_age = int(response.cookies["sessionid"]["max-age"])
+        self.assertEqual(reissued_max_age, self.client.session.get_expiry_age())
 
 
 class ProfileMembershipModelTests(TestCase):
@@ -1137,7 +1734,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         cls.admin.profile.roles.add(cls.admin_role)
         cls.member = User.objects.create_user(username="profile-member", password="testpass123")
         cls.member.profile.first_name = "Philipp"
-        cls.member.profile.last_name = "ThÃ¼rlemann"
+        cls.member.profile.last_name = "Thürlemann"
         cls.member.profile.vulgo = "Newton"
         cls.member.profile.save()
 
@@ -1147,7 +1744,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
                 "first_name": "Philipp",
-                "last_name": "ThÃ¼rlemann",
+                "last_name": "Thürlemann",
                 "vulgo": "Newton",
                 "academic_title": "MSc",
                 "degree_program": "Biotechnology",
@@ -1161,6 +1758,27 @@ class ProfilePermissionAndMemorialTests(TestCase):
         self.assertEqual(self.member.profile.degree_program, "Biotechnology")
         self.assertEqual(str(self.member.profile.birth_date), "1998-02-24")
 
+    def test_member_can_select_a_standard_profile_icon(self):
+        self.client.login(username="profile-member", password="testpass123")
+        response = self.client.post(
+            reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
+            {
+                "first_name": "Philipp",
+                "last_name": "Thürlemann",
+                "vulgo": "Newton",
+                "academic_title": "",
+                "degree_program": "",
+                "birth_date": "",
+                "avatar_icon": Profile.AvatarIcon.FUXMAJOR_M,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.member.profile.refresh_from_db()
+        self.assertEqual(self.member.profile.avatar_icon, Profile.AvatarIcon.FUXMAJOR_M)
+        self.assertContains(response, "images/profile-icons/FM_M-384.png")
+
     def test_existing_birth_date_is_rendered_in_html5_date_format(self):
         self.member.profile.birth_date = datetime(1998, 2, 24).date()
         self.member.profile.save()
@@ -1169,7 +1787,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         response = self.client.get(reverse("profile-edit", kwargs={"pk": self.member.profile.pk}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'value="1998-02-24"', html=True)
+        self.assertContains(response, 'value="1998-02-24"')
 
     def test_existing_birth_date_is_not_cleared_when_editing_other_fields(self):
         self.member.profile.birth_date = datetime(1998, 2, 24).date()
@@ -1181,7 +1799,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
                 "first_name": "Philipp",
-                "last_name": "ThÃ¼rlemann",
+                "last_name": "Thürlemann",
                 "vulgo": "Newton",
                 "academic_title": "MSc",
                 "degree_program": "Humanmedizin",
@@ -1201,7 +1819,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
                 "first_name": "Philipp",
-                "last_name": "ThÃ¼rlemann",
+                "last_name": "Thürlemann",
                 "vulgo": "Newton",
                 "academic_title": "MSc",
                 "degree_program": "Biotechnology",
@@ -1233,7 +1851,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
                 "first_name": "Philipp",
-                "last_name": "ThÃ¼rlemann",
+                "last_name": "Thürlemann",
                 "vulgo": "Newton",
                 "academic_title": "Dr. med.",
                 "degree_program": "Humanmedizin",
@@ -1265,7 +1883,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         entries = MemorialEntry.objects.filter(member_profile=self.member.profile, is_profile_generated=True)
         self.assertEqual(entries.count(), 1)
         entry = entries.get()
-        self.assertEqual(entry.display_name, "Dr. med. Philipp ThÃ¼rlemann v/o Newton")
+        self.assertEqual(entry.display_name, "Dr. med. Philipp Thürlemann v/o Newton")
         self.assertEqual(entry.birth_display, "24.02.1998")
         self.assertEqual(entry.death_display, "17.07.2026")
         self.member.refresh_from_db()
@@ -1291,7 +1909,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         self.member.profile.vulgo = "Nova"
         self.member.profile.save()
         entry = MemorialEntry.objects.get(member_profile=self.member.profile, is_profile_generated=True)
-        self.assertEqual(entry.display_name, "Prof. Dr. Philipp ThÃ¼rlemann v/o Nova")
+        self.assertEqual(entry.display_name, "Prof. Dr. Philipp Thürlemann v/o Nova")
 
 
 @skip("The memorial board is internal only; the public endpoint has been removed.")
@@ -1302,7 +1920,7 @@ class MemorialApiTests(TestCase):
             death_date_display="April 1990",
             sort_order=5,
             is_published=True,
-            legacy_marker="â€ ",
+            legacy_marker="†",
         )
         MemorialEntry.objects.create(
             display_name="Historisch Zwei",
@@ -1324,7 +1942,7 @@ class MemorialApiTests(TestCase):
         self.assertEqual(set(payload["results"][0].keys()), {"display_name", "birth_display", "death_display", "is_honorary_member", "legacy_marker"})
 
     def test_public_memorial_api_excludes_unpublished_entries(self):
-        MemorialEntry.objects.create(display_name="Ã–ffentlich", death_date=datetime(2026, 7, 17).date(), is_published=True)
+        MemorialEntry.objects.create(display_name="Öffentlich", death_date=datetime(2026, 7, 17).date(), is_published=True)
         MemorialEntry.objects.create(display_name="Privat", death_date=datetime(2026, 7, 18).date(), is_published=False)
 
         response = self.client.get(reverse("api-v1-public-memorials"))
@@ -1332,7 +1950,7 @@ class MemorialApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["results"][0]["display_name"], "Ã–ffentlich")
+        self.assertEqual(payload["results"][0]["display_name"], "Öffentlich")
 class MemorialPageTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -1749,7 +2367,7 @@ class MemorialImportCommandTests(TestCase):
                 dedent(
                     """\
                     import_key,display_name,birth_date,birth_date_display,death_date,death_date_display,is_honorary_member,legacy_marker,sort_order,is_published
-                    hist-1,Historisch Eins,1923-01-02,,1990-04-05,,0,â€ ,5,1
+                    hist-1,Historisch Eins,1923-01-02,,1990-04-05,,0,†,5,1
                     """
                 ),
                 encoding="utf-8",
@@ -1886,19 +2504,20 @@ class BootstrapInternalCommandTests(TestCase):
 
     def test_password_cli_flag_no_longer_exists(self):
         with self.assertRaises(CommandError):
-            call_command("bootstrap_internal", "--username", "shouldfail", "--password", "leaked-on-cli")
+            call_command("bootstrap_internal", "--email", "shouldfail@example.org", "--password", "leaked-on-cli")
 
     def test_password_from_environment_variable_is_used(self):
         import os
         from unittest.mock import patch
 
         with patch.dict(os.environ, {"AVF_BOOTSTRAP_ADMIN_PASSWORD": "from-env-Secure123!"}):
-            call_command("bootstrap_internal", "--username", "env-admin", "--email", "env-admin@example.org")
+            call_command("bootstrap_internal", "--email", "env-admin@example.org")
 
-        user = User.objects.get(username="env-admin")
+        user = User.objects.get(email="env-admin@example.org")
         self.assertTrue(user.check_password("from-env-Secure123!"))
         self.assertTrue(user.is_staff)
         self.assertTrue(user.is_superuser)
+        self.assertTrue(user.username.startswith("mitglied-"))
 
     def test_password_prompted_interactively_when_env_var_missing(self):
         import os
@@ -1907,10 +2526,10 @@ class BootstrapInternalCommandTests(TestCase):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AVF_BOOTSTRAP_ADMIN_PASSWORD", None)
             with patch("getpass.getpass", return_value="prompted-Secure123!") as mocked_prompt:
-                call_command("bootstrap_internal", "--username", "prompt-admin")
+                call_command("bootstrap_internal", "--email", "prompt-admin@example.org")
             mocked_prompt.assert_called_once()
 
-        user = User.objects.get(username="prompt-admin")
+        user = User.objects.get(email="prompt-admin@example.org")
         self.assertTrue(user.check_password("prompted-Secure123!"))
 
     def test_empty_password_everywhere_aborts_without_creating_a_user(self):
@@ -1921,7 +2540,6 @@ class BootstrapInternalCommandTests(TestCase):
             os.environ.pop("AVF_BOOTSTRAP_ADMIN_PASSWORD", None)
             with patch("getpass.getpass", return_value=""):
                 with self.assertRaises(SystemExit):
-                    call_command("bootstrap_internal", "--username", "nopassword-admin")
+                    call_command("bootstrap_internal", "--email", "nopassword-admin@example.org")
 
-        self.assertFalse(User.objects.filter(username="nopassword-admin").exists())
-
+        self.assertFalse(User.objects.filter(email="nopassword-admin@example.org").exists())

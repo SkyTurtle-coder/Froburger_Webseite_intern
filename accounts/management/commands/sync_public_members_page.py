@@ -41,7 +41,8 @@ def validate_public_member_media_urls(allow_private_media_host=False):
 
     for section in payload.get("sections", {}).values():
         for member in section.get("members", []):
-            for variant in member.get("photo", {}).get("variants", {}).values():
+            photo = member.get("photo") or {}
+            for variant in photo.get("variants", {}).values():
                 url = (variant.get("url") or "").strip()
                 if not url:
                     continue

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block page_title %}Mitglieder importieren{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header">
+        <div>
+            <p class="section-kicker">Mitglieder</p>
+            <h2>CSV importieren</h2>
+            <p class="panel__lead">Neue Mitglieder werden angelegt. Bei bestehenden Mitgliedern werden neue Rollen ergänzt.</p>
+        </div>
+        <a href="{% url 'profile-list' %}" class="button button--ghost">Zurück</a>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="form-stack">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" with form=form %}
+        <div class="button-row">
+            <button type="submit" class="button">Import starten</button>
+            <a href="{% url 'profile-list' %}" class="button button--ghost">Abbrechen</a>
+        </div>
+    </form>
+
+    {% if import_result %}
+    <div class="form-stack">
+        <h3>Ergebnis</h3>
+        <p>{{ import_result.created_count }} Mitglieder angelegt.</p>
+        <p>{{ import_result.updated_count }} Mitglieder aktualisiert.</p>
+        <p>{{ import_result.skipped_duplicates|length }} Duplikate übersprungen.</p>
+        <p>{{ import_result.skipped_invalid|length }} fehlerhafte Zeilen übersprungen.</p>
+
+        {% if import_result.skipped_duplicates or import_result.skipped_invalid %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Zeile</th>
+                        <th>Mitglied</th>
+                        <th>E-Mail</th>
+                        <th>Grund</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for issue in import_result.skipped_duplicates %}
+                    <tr>
+                        <td>{{ issue.row_number }}</td>
+                        <td>{{ issue.display_name }}</td>
+                        <td>{{ issue.email }}</td>
+                        <td>{{ issue.reason }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% for issue in import_result.skipped_invalid %}
+                    <tr>
+                        <td>{{ issue.row_number }}</td>
+                        <td>{{ issue.display_name }}</td>
+                        <td>{{ issue.email }}</td>
+                        <td>{{ issue.reason }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
