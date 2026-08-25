@@ -129,6 +129,22 @@ class DocumentForm(forms.ModelForm):
             upload.seek(0)
             if not any(header.startswith(signature) for signature in magic_signatures):
                 raise forms.ValidationError("Der Inhalt der Datei passt nicht zur Dateiendung.")
+        elif extension == "txt":
+            # .txt has no magic-byte signature to check (a gap flagged during
+            # independent verification: without this, a binary payload
+            # renamed to .txt passed both the content-type and magic-byte
+            # checks above unchecked). Reject anything that isn't plausibly
+            # plain text - null bytes or invalid UTF-8 mean it isn't.
+            sample = upload.read(8192)
+            upload.seek(0)
+            is_plain_text = b"\x00" not in sample
+            if is_plain_text:
+                try:
+                    sample.decode("utf-8")
+                except UnicodeDecodeError:
+                    is_plain_text = False
+            if not is_plain_text:
+                raise forms.ValidationError("Der Inhalt der Datei passt nicht zur Dateiendung.")
 
         return upload
 

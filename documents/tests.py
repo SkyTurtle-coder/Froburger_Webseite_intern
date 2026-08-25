@@ -624,3 +624,19 @@ class DocumentUploadValidationTests(TestCase):
         response = self._upload(upload)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Document.objects.filter(title="Testdokument").exists())
+
+    def test_binary_payload_renamed_to_txt_is_rejected(self):
+        # .txt has no magic-byte signature (unlike pdf/docx/etc.), so this
+        # gap - a binary payload renamed to .txt sailing through unchecked -
+        # needed its own dedicated content check.
+        upload = SimpleUploadedFile("notiz.txt", b"MZ\x90\x00\x00\x00\xffbinary-content", content_type="text/plain")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Document.objects.filter(title="Testdokument").exists())
+        self.assertContains(response, "Der Inhalt der Datei passt nicht zur Dateiendung")
+
+    def test_utf8_text_with_umlauts_is_accepted_as_txt(self):
+        upload = SimpleUploadedFile("notiz.txt", "Protokoll mit Umlauten: äöü ß".encode("utf-8"), content_type="text/plain")
+        response = self._upload(upload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Document.objects.filter(title="Testdokument").exists())
