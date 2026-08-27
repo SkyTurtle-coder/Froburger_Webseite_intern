@@ -17,7 +17,7 @@ from django.views.generic import CreateView, DetailView, FormView, ListView, Tem
 from django.views.generic.detail import SingleObjectMixin
 
 from core.permissions import RoleAccessMixin
-from documents.models import Document, FolderScope
+from documents.models import Document, DocumentFolder, FolderScope
 
 from .auth_forms import VulgoAuthenticationForm
 from .forms import (
@@ -51,11 +51,21 @@ def _delete_document_and_file(document):
         _delete_document_file_if_unused(file_name)
 
 
+def _get_obituary_folder():
+    """Return the shared general-document folder used for all obituaries."""
+    return DocumentFolder.objects.get_or_create(
+        name="Nachrufe",
+        scope=FolderScope.GENERAL,
+        parent=None,
+    )[0]
+
+
 def _build_obituary_document(user, entry, upload):
     return Document.objects.create(
         title=f"Nachruf {entry.display_name}",
         description=f"Nachruf zur Totentafel für {entry.display_name}",
         visibility=FolderScope.GENERAL,
+        folder=_get_obituary_folder(),
         file=upload,
         uploaded_by=user,
     )

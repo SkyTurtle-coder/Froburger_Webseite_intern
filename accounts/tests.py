@@ -2167,6 +2167,8 @@ class MemorialObituaryTests(TestCase):
         entry = MemorialEntry.objects.get(display_name="Albert Beispiel")
         self.assertIsNotNone(entry.obituary_document)
         self.assertEqual(entry.obituary_document.visibility, FolderScope.GENERAL)
+        self.assertEqual(entry.obituary_document.folder.name, "Nachrufe")
+        self.assertEqual(entry.obituary_document.folder.scope, FolderScope.GENERAL)
         self.assertTrue(entry.obituary_document.file.name.startswith("protected/"))
 
     def test_normal_member_can_open_pdf(self):
