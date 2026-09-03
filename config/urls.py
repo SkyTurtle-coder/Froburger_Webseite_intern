@@ -51,7 +51,6 @@ urlpatterns = [
             form_class=AccountActivationForm,
             template_name="registration/account_activation_form.html",
             email_template_name="registration/account_activation_email.txt",
-            html_email_template_name="registration/account_activation_email.html",
             subject_template_name="registration/account_activation_subject.txt",
             success_url=reverse_lazy("account_activation_done"),
             token_generator=account_activation_token_generator,

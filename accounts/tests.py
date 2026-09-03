@@ -1797,7 +1797,7 @@ class AccountActivationTests(TestCase):
         SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
         DEFAULT_FROM_EMAIL="AV Froburger Intern <noreply@intern-avfroburger.ch>",
     )
-    def test_activation_mail_uses_branded_html_and_https_link(self):
+    def test_activation_mail_uses_expected_from_route_and_https_domain(self):
         _response, message, link = self._issue_activation_mail(
             HTTP_HOST="internal.invalid",
             HTTP_X_FORWARDED_HOST="intern.avfroburger.ch",
@@ -1807,9 +1807,8 @@ class AccountActivationTests(TestCase):
         self.assertEqual(message.from_email, "AV Froburger Intern <noreply@intern-avfroburger.ch>")
         self.assertEqual(message.subject, "AV Froburger Intern: Konto aktivieren")
         self.assertTrue(link.startswith("https://intern.avfroburger.ch/accounts/activate/"))
-        self.assertEqual(len(message.alternatives), 1)
-        self.assertEqual(message.alternatives[0][1], "text/html")
-        self.assertIn("Konto aktivieren", message.alternatives[0][0])
+        # Plain-text only, same as the password-reset mail - no branded HTML part.
+        self.assertEqual(len(message.alternatives), 0)
 
     def test_valid_activation_link_sets_first_password(self):
         _response, _message, link = self._issue_activation_mail()
