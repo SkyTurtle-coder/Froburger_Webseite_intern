@@ -1,0 +1,10 @@
+Guten Tag
+
+Für dich wurde ein Konto im internen Bereich der AV Froburger vorbereitet.
+
+Über den folgenden Link kannst du dein persönliches Passwort festlegen und dein Konto aktivieren. Der Link ist 2 Stunden gültig:
+{{ protocol }}://{{ domain }}{% url 'account_activate' uidb64=uid token=token %}
+
+Falls du kein Konto erwartest, kannst du diese Nachricht ignorieren.
+
+AV Froburger

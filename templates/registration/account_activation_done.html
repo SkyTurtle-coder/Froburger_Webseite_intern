@@ -1,0 +1,19 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>E-Mail versendet | AV Froburger Intern</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="login-body">
+    <main class="login-card">
+        <p class="login-card__eyebrow">AV Froburger</p>
+        <h1 class="login-card__title">E-Mail versendet</h1>
+        <p class="login-card__text">Falls ein aktives Konto mit dieser E-Mail-Adresse vorbereitet wurde, haben wir einen Aktivierungslink versendet.</p>
+        <p class="login-card__text">Bitte prüfe auch deinen Spam-Ordner. Falls noch kein Konto besteht, wende dich an den Administrator.</p>
+        <p class="login-card__text"><a href="{% url 'login' %}" class="text-link">Zurück zur Anmeldung</a></p>
+    </main>
+</body>
+</html>

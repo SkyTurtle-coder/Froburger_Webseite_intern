@@ -1,4 +1,39 @@
 (() => {
+    const rows = document.querySelectorAll("[data-event-row][data-event-edit-url]");
+
+    if (!rows.length) {
+        return;
+    }
+
+    const interactiveSelector = "a, button, input, select, textarea, label, summary, details";
+
+    rows.forEach((row) => {
+        row.addEventListener("click", (event) => {
+            if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.shiftKey ||
+                event.altKey ||
+                event.target.closest(interactiveSelector)
+            ) {
+                return;
+            }
+
+            window.location.assign(row.dataset.eventEditUrl);
+        });
+
+        row.addEventListener("keydown", (event) => {
+            if (event.target === row && event.key === "Enter") {
+                event.preventDefault();
+                window.location.assign(row.dataset.eventEditUrl);
+            }
+        });
+    });
+})();
+
+(() => {
     const root = document.documentElement;
     const body = document.body;
     const toggle = document.querySelector("[data-menu-toggle]");

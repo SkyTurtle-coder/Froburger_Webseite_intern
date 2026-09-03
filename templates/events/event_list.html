@@ -47,7 +47,7 @@
         </div>
     </form>
     <div class="table-wrap">
-        <table class="table">
+        <table class="table table--events">
             <thead>
                 <tr>
                     <th>Titel</th>
@@ -63,8 +63,17 @@
             </thead>
             <tbody>
                 {% for event in events %}
-                <tr>
-                    <td>{{ event.title }}</td>
+                <tr
+                    class="event-row"
+                    tabindex="0"
+                    data-event-row
+                    data-event-edit-url="{% url 'event-edit' event.pk %}"
+                >
+                    <td>
+                        <a href="{% url 'event-edit' event.pk %}" class="event-row__title-link">
+                            {{ event.title }}
+                        </a>
+                    </td>
                     <td>{{ event.slug }}</td>
                     <td>{{ event.start|date:"d.m.Y H:i" }}</td>
                     <td>{{ event.end|date:"d.m.Y H:i" }}</td>
@@ -85,8 +94,17 @@
                         {% endif %}
                     </td>
                     <td class="actions-cell">
-                        <a href="{% url 'event-edit' event.pk %}" class="text-link">Bearbeiten</a>
-                        <a href="{% url 'event-delete' event.pk %}" class="text-link danger-link">Löschen</a>
+                        <a
+                            href="{% url 'event-delete' event.pk %}"
+                            class="event-row__delete"
+                            aria-label="Anlass {{ event.title }} löschen"
+                            title="Anlass löschen"
+                        >
+                            <svg class="event-row__delete-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z" fill="currentColor"/>
+                            </svg>
+                            <span>Löschen</span>
+                        </a>
                     </td>
                 </tr>
                 {% empty %}

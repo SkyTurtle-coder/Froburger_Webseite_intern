@@ -230,7 +230,7 @@ class PublicEventDetailView(DetailView):
     slug_url_kwarg = "slug"
 
     def get_queryset(self):
-        return Event.objects.filter(is_public=True).prefetch_related("signup_columns", "signups").order_by("start", "title")
+        return Event.objects.filter(is_public=True, is_cancelled=False).prefetch_related("signup_columns", "signups").order_by("start", "title")
 
     def post(self, request, *args, **kwargs):
         self.object = self.get_object()
@@ -266,7 +266,7 @@ class PublicEventDetailView(DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         signups = list(self.object.signups.public_visible().order_by("created_at", "pk"))
-        signup_columns = list(self.object.active_signup_columns())
+        signup_columns = [column for column in self.object.active_signup_columns() if column.is_public]
         signup_rows = [
             {
                 "signup": signup,
@@ -285,7 +285,9 @@ class PublicEventDetailView(DetailView):
     def _client_ip(self):
         forwarded_for = self.request.META.get("HTTP_X_FORWARDED_FOR", "")
         if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
+            parts = [part.strip() for part in forwarded_for.split(",") if part.strip()]
+            if parts:
+                return parts[-1]
         return self.request.META.get("REMOTE_ADDR", "unknown")
 
     def _signup_cache_key(self):

@@ -605,6 +605,70 @@ h3 {
     white-space: nowrap;
 }
 
+.table--events .event-row {
+    cursor: pointer;
+    transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.table--events .event-row:hover,
+.table--events .event-row:focus-visible,
+.table--events .event-row:focus-within {
+    background: rgba(36, 92, 43, 0.055);
+}
+
+.table--events .event-row:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: -2px;
+}
+
+.event-row__title-link {
+    color: var(--green-dark);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.event-row__title-link:hover,
+.event-row__title-link:focus-visible {
+    color: var(--green);
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+}
+
+.event-row .actions-cell {
+    width: 1%;
+    text-align: right;
+}
+
+.event-row__delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.35rem;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid rgba(156, 48, 37, 0.35);
+    border-radius: 999px;
+    background: rgba(156, 48, 37, 0.08);
+    color: var(--danger);
+    font-size: 0.86rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.event-row__delete:hover,
+.event-row__delete:focus-visible {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: #fff;
+}
+
+.event-row__delete-icon {
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 auto;
+}
+
 .card-grid,
 .two-column {
     display: grid;

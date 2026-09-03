@@ -266,6 +266,8 @@ class ProfileUpdateView(LoginRequiredMixin, UpdateView):
     context_object_name = "profile_obj"
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
         profile = self.get_object()
         if not request.user.profile.can_manage_roles() and profile.pk != request.user.profile.pk:
             return redirect("profile-detail", pk=request.user.profile.pk)

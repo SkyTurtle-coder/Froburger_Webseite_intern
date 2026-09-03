@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block page_title %}Konto aktiviert{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Zugang</p>
+            <h2>Konto aktiviert</h2>
+            <p class="panel__lead">Dein Passwort wurde gespeichert. Du kannst dich jetzt mit deiner E-Mail-Adresse oder deinem Vulgo anmelden.</p>
+        </div>
+    </div>
+    <div class="button-row">
+        <a href="{% url 'login' %}" class="button">Zur Anmeldung</a>
+    </div>
+</section>
+{% endblock %}

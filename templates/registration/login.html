@@ -27,6 +27,7 @@
             {% endif %}
             <button type="submit" class="button">Anmelden</button>
         </form>
+        <p class="login-card__text"><a href="{% url 'account_activation' %}" class="text-link">Konto erstmals aktivieren</a></p>
         <p class="login-card__text"><a href="{% url 'password_reset' %}" class="text-link">Passwort vergessen?</a></p>
         <p class="login-card__text"><a href="{{ public_site_url }}" class="text-link">Zur Webseite</a></p>
     </main>

@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
 from django.utils.crypto import get_random_string
@@ -8,11 +9,29 @@ from .models import MemorialEntry, Profile, Role
 
 
 MAX_OBITUARY_FILE_SIZE = 20 * 1024 * 1024
+MAX_MEMBER_CSV_FILE_SIZE = 5 * 1024 * 1024
+MAX_PROFILE_PHOTO_FILE_SIZE = 20 * 1024 * 1024
+MAX_PROFILE_PHOTO_PIXELS = 40_000_000
 ISO_DATE_INPUT_FORMAT = "%Y-%m-%d"
 
 
 def html5_date_input():
     return forms.DateInput(format=ISO_DATE_INPUT_FORMAT, attrs={"type": "date"})
+
+
+def validate_profile_photo(upload):
+    """Apply resource limits after Django/Pillow has verified the image."""
+    if not upload or getattr(upload, "_committed", False):
+        return upload
+    if upload.size > MAX_PROFILE_PHOTO_FILE_SIZE:
+        raise forms.ValidationError("Das Profilfoto darf höchstens 20 MB gross sein.")
+
+    image = getattr(upload, "image", None)
+    width = getattr(image, "width", 0) or 0
+    height = getattr(image, "height", 0) or 0
+    if width * height > MAX_PROFILE_PHOTO_PIXELS:
+        raise forms.ValidationError("Das Profilfoto hat zu viele Bildpunkte.")
+    return upload
 
 
 class RoleMultipleChoiceField(forms.ModelMultipleChoiceField):
@@ -28,6 +47,8 @@ class MemberCsvImportForm(forms.Form):
 
     def clean_csv_file(self):
         uploaded_file = self.cleaned_data["csv_file"]
+        if uploaded_file.size > MAX_MEMBER_CSV_FILE_SIZE:
+            raise forms.ValidationError("Die CSV-Datei darf höchstens 5 MB gross sein.")
         file_name = (uploaded_file.name or "").lower()
         if not file_name.endswith(".csv"):
             raise forms.ValidationError("Bitte eine CSV-Datei hochladen.")
@@ -69,9 +90,12 @@ class ProfileBaseForm(forms.ModelForm):
             "academic_title": "Beispielsweise Dr. med., MSc, BSc oder Prof. Dr.",
         }
 
+    def clean_photo(self):
+        return validate_profile_photo(self.cleaned_data.get("photo"))
+
 
 class UserWithProfileCreationForm(UserCreationForm):
-    email = forms.EmailField(required=False)
+    email = forms.EmailField(required=True)
     first_name = forms.CharField(label="Vorname", max_length=150)
     last_name = forms.CharField(label="Name", max_length=150)
     vulgo = forms.CharField(label="v/o", max_length=150, required=False)
@@ -127,6 +151,15 @@ class UserWithProfileCreationForm(UserCreationForm):
         super().__init__(*args, **kwargs)
         self.fields.pop("username", None)
         self.fields["roles"].queryset = Role.objects.order_by("code")
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip().lower()
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("Für diese E-Mail-Adresse besteht bereits ein Konto.")
+        return email
+
+    def clean_photo(self):
+        return validate_profile_photo(self.cleaned_data.get("photo"))
 
     def save(self, commit=True):
         user = super().save(commit=False)
@@ -184,6 +217,26 @@ class PortalPasswordResetForm(PasswordResetForm):
             return
         throttling.register_password_reset_attempt(request, email)
         return super().save(*args, **kwargs)
+
+
+class AccountActivationForm(PortalPasswordResetForm):
+    """Send an activation link only for one unambiguous, provisioned account."""
+
+    def get_users(self, email):
+        user_model = get_user_model()
+        users = list(
+            user_model._default_manager.filter(
+                email__iexact=email,
+                is_active=True,
+            ).order_by("pk")[:2]
+        )
+        if len(users) != 1:
+            return ()
+        return users
+
+
+class AccountActivationSetPasswordForm(AdminUserPasswordResetForm):
+    pass
 
 
 class ProfileForm(ProfileBaseForm):

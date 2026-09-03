@@ -1,0 +1,28 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Konto aktivieren | AV Froburger Intern</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="login-body">
+    <main class="login-card">
+        <p class="login-card__eyebrow">AV Froburger</p>
+        <h1 class="login-card__title">Konto aktivieren</h1>
+        <p class="login-card__text">Gib die E-Mail-Adresse ein, die der Administrator für dein Konto hinterlegt hat. Wir senden dir einen Link zum Festlegen deines Passworts.</p>
+        <form method="post" class="form-stack">
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            <div class="field">
+                <label for="{{ form.email.id_for_label }}">E-Mail-Adresse</label>
+                {{ form.email }}
+                {{ form.email.errors }}
+            </div>
+            <button type="submit" class="button">Aktivierungslink anfordern</button>
+        </form>
+        <p class="login-card__text"><a href="{% url 'login' %}" class="text-link">Zurück zur Anmeldung</a></p>
+    </main>
+</body>
+</html>

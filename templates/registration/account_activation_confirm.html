@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block page_title %}Konto aktivieren{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Zugang</p>
+            <h2>Eigenes Passwort festlegen</h2>
+            {% if validlink %}
+            <p class="panel__lead">Lege jetzt dein persönliches Passwort für den internen Bereich fest.</p>
+            {% else %}
+            <p class="panel__lead">Dieser Aktivierungslink ist ungültig oder abgelaufen. Bitte fordere einen neuen Link an.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if validlink %}
+    <form method="post" class="form-stack password-form">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+        {% include "partials/form_field.html" with field=field %}
+        {% endfor %}
+        <div class="button-row password-form__actions">
+            <button type="submit" class="button">Konto aktivieren</button>
+            <a href="{% url 'login' %}" class="button button--ghost">Abbrechen</a>
+        </div>
+    </form>
+    {% else %}
+    <div class="button-row">
+        <a href="{% url 'account_activation' %}" class="button">Neuen Link anfordern</a>
+        <a href="{% url 'login' %}" class="button button--ghost">Zur Anmeldung</a>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

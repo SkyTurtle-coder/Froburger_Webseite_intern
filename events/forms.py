@@ -13,6 +13,13 @@ class EventForm(forms.ModelForm):
         input_formats=["%Y-%m-%dT%H:%M"],
         widget=forms.DateTimeInput(format="%Y-%m-%dT%H:%M", attrs={"type": "datetime-local"}),
     )
+    signup_deadline_at = forms.DateTimeField(
+        label="Anmeldeschluss",
+        required=False,
+        help_text="Optional. Ohne Eingabe endet die Anmeldung am Veranstaltungstag um 00:01 Uhr.",
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(format="%Y-%m-%dT%H:%M", attrs={"type": "datetime-local"}),
+    )
 
     class Meta:
         model = Event
@@ -23,6 +30,7 @@ class EventForm(forms.ModelForm):
             "description",
             "start",
             "end",
+            "signup_deadline_at",
             "location",
             "status",
             "is_public",
@@ -36,6 +44,7 @@ class EventForm(forms.ModelForm):
             "description": "Beschreibung",
             "start": "Beginn",
             "end": "Ende",
+            "signup_deadline_at": "Anmeldeschluss",
             "location": "Ort",
             "status": "Status",
             "is_public": "Öffentlich sichtbar",
@@ -46,6 +55,7 @@ class EventForm(forms.ModelForm):
             "slug": "Leer lassen für automatische Generierung.",
             "short_description": "Pflicht für öffentliche Anlässe.",
             "location": "Pflicht für öffentliche Anlässe.",
+            "signup_deadline_at": "Optional. Ohne Eingabe endet die Anmeldung am Veranstaltungstag um 00:01 Uhr.",
             "is_cancelled": "Abgesagte Anlässe bleiben im Kalender als Absage sichtbar.",
         }
 
@@ -174,6 +184,8 @@ class EventSignupPublicForm(forms.Form):
 
     def clean(self):
         cleaned_data = super().clean()
+        if not self.event.signup_enabled:
+            raise forms.ValidationError("Für diesen Anlass sind keine Anmeldungen möglich.")
         if self.event.is_signup_closed:
             raise forms.ValidationError("Die Anmeldung für diesen Anlass ist geschlossen.")
         return cleaned_data
@@ -234,6 +246,14 @@ class EventSignupManageForm(forms.Form):
                     column.key,
                     False if column.field_type == EventSignupColumn.FIELD_TYPE_CHECKBOX else "",
                 )
+
+    def clean_signup_id(self):
+        signup_id = self.cleaned_data["signup_id"]
+        # The hidden field is only a transport value. The authoritative
+        # signup is bound by the server in EventUpdateView.
+        if self.signup is None or signup_id != self.signup.pk:
+            raise forms.ValidationError("Ungültige Anmeldung.")
+        return signup_id
 
     def clean_vulgo(self):
         value = (self.cleaned_data.get("vulgo") or "").strip()

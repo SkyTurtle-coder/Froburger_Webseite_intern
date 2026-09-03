@@ -12,8 +12,9 @@ from django.contrib.auth.views import (
 )
 from django.urls import include, path, reverse_lazy
 
-from accounts.forms import PortalPasswordResetForm
+from accounts.forms import AccountActivationForm, AccountActivationSetPasswordForm, PortalPasswordResetForm
 from accounts.public_views import v1_public_members_api
+from accounts.tokens import account_activation_token_generator
 from accounts.views import PortalLoginView
 from core.views import DashboardView, healthcheck_view
 from events.public_views import (
@@ -44,6 +45,39 @@ urlpatterns = [
     path("api/v1/public/members/", v1_public_members_api, name="api-v1-public-members"),
     path("accounts/login/", PortalLoginView.as_view(), name="login"),
     path("accounts/logout/", LogoutView.as_view(), name="logout"),
+    path(
+        "accounts/register/",
+        PasswordResetView.as_view(
+            form_class=AccountActivationForm,
+            template_name="registration/account_activation_form.html",
+            email_template_name="registration/account_activation_email.txt",
+            html_email_template_name="registration/account_activation_email.html",
+            subject_template_name="registration/account_activation_subject.txt",
+            success_url=reverse_lazy("account_activation_done"),
+            token_generator=account_activation_token_generator,
+        ),
+        name="account_activation",
+    ),
+    path(
+        "accounts/register/done/",
+        PasswordResetDoneView.as_view(template_name="registration/account_activation_done.html"),
+        name="account_activation_done",
+    ),
+    path(
+        "accounts/activate/<uidb64>/<token>/",
+        PasswordResetConfirmView.as_view(
+            form_class=AccountActivationSetPasswordForm,
+            template_name="registration/account_activation_confirm.html",
+            success_url=reverse_lazy("account_activation_complete"),
+            token_generator=account_activation_token_generator,
+        ),
+        name="account_activate",
+    ),
+    path(
+        "accounts/activate/done/",
+        PasswordResetCompleteView.as_view(template_name="registration/account_activation_complete.html"),
+        name="account_activation_complete",
+    ),
     path(
         "accounts/password_reset/",
         PasswordResetView.as_view(

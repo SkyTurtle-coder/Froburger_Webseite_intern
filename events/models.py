@@ -32,6 +32,7 @@ class Event(models.Model):
     is_cancelled = models.BooleanField(default=False)
     show_on_homepage = models.BooleanField(default=False)
     signup_enabled = models.BooleanField(default=True)
+    signup_deadline_at = models.DateTimeField(null=True, blank=True)
     calendar_uid = models.CharField(max_length=255, unique=True, blank=True, editable=False)
     calendar_sequence = models.PositiveIntegerField(default=0, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -148,6 +149,9 @@ class Event(models.Model):
 
     @property
     def signup_deadline(self):
+        if self.signup_deadline_at:
+            return self.signup_deadline_at
+
         local_start = timezone.localtime(self.start)
         deadline_local = datetime.combine(local_start.date(), time(hour=0, minute=1))
         return timezone.make_aware(deadline_local, timezone.get_current_timezone())

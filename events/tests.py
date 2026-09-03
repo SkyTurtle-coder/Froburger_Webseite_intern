@@ -82,6 +82,19 @@ class EventModelTests(TestCase):
 
         self.assertEqual(timezone.localtime(deadline).strftime("%Y-%m-%d %H:%M"), "2026-08-12 00:01")
 
+    @override_settings(TIME_ZONE="Europe/Zurich")
+    def test_signup_deadline_uses_custom_value_when_set(self):
+        custom_deadline = timezone.make_aware(datetime(2026, 8, 10, 18, 30))
+        event = Event(
+            title="Fruehanlass",
+            start=timezone.make_aware(datetime(2026, 8, 12, 20, 0)),
+            end=timezone.make_aware(datetime(2026, 8, 12, 22, 0)),
+            status="INTERN",
+            signup_deadline_at=custom_deadline,
+        )
+
+        self.assertEqual(event.signup_deadline, custom_deadline)
+
     def test_signup_normalizes_vulgo_whitespace_and_case(self):
         now = timezone.now() + timedelta(days=7)
         event = Event.objects.create(
@@ -304,6 +317,21 @@ class EventPublicApiTests(TestCase):
         self.assertEqual(payload["results"][0]["slug"], self.past.slug)
         self.assertNotEqual(payload["results"][0]["slug"], self.upcoming.slug)
 
+    def test_read_only_public_endpoints_reject_post(self):
+        urls = (
+            reverse("api-public-events-upcoming"),
+            reverse("api-v1-events-upcoming"),
+            reverse("api-v1-events-past"),
+            reverse("api-v1-event-detail", kwargs={"slug": self.upcoming.slug}),
+            reverse("api-v1-events-calendar"),
+            reverse("public-calendar-feed"),
+            reverse("public-event-calendar", kwargs={"slug": self.upcoming.slug}),
+        )
+
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.post(url).status_code, 405)
+
     def test_v1_detail_api_returns_single_object_for_wordpress_internal_event(self):
         response = self.client.get(reverse("api-v1-event-detail", kwargs={"slug": self.internal_wordpress.slug}))
         self.assertEqual(response.status_code, 200)
@@ -513,6 +541,62 @@ class EventPublicSignupApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "unknown_fields")
+
+    def test_signup_api_rejects_non_boolean_integer(self):
+        response = self._post(
+            {
+                "vulgo": "Euler",
+                "attending": 2,
+                "values": {self.public_column.key: "Alles"},
+            }
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "missing_attending")
+        self.assertFalse(EventSignup.objects.filter(event=self.event, normalized_vulgo="euler").exists())
+
+    def test_signup_api_rejects_tampered_top_level_fields(self):
+        response = self._post(
+            {
+                "vulgo": "Euler",
+                "attending": True,
+                "values": {self.public_column.key: "Alles"},
+                "is_public": False,
+            }
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "invalid_payload")
+        self.assertFalse(EventSignup.objects.filter(event=self.event, normalized_vulgo="euler").exists())
+
+    def test_signup_api_rejects_non_scalar_column_values(self):
+        response = self._post(
+            {
+                "vulgo": "Euler",
+                "attending": True,
+                "values": {self.public_column.key: ["Alles", "Vegan"]},
+            }
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "invalid_value")
+        self.assertFalse(EventSignup.objects.filter(event=self.event, normalized_vulgo="euler").exists())
+
+    def test_signup_api_rechecks_disabled_state_on_server(self):
+        self.event.signup_enabled = False
+        self.event.save(update_fields=["signup_enabled"])
+
+        response = self._post(
+            {
+                "vulgo": "Gauss",
+                "attending": True,
+                "values": {self.public_column.key: "Alles"},
+            }
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "signup_disabled")
+        self.assertFalse(EventSignup.objects.filter(event=self.event, normalized_vulgo="gauss").exists())
 
     def test_signup_api_rejects_when_deadline_has_passed(self):
         self.event.start = timezone.now() - timedelta(hours=2)
@@ -783,6 +867,19 @@ class EventSignupManagementTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_event_list_uses_clickable_rows_and_prominent_delete_action(self):
+        self.client.login(username="webx", password="testpass123")
+
+        response = self.client.get(reverse("event-list"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        edit_url = reverse("event-edit", kwargs={"pk": self.event.pk})
+        self.assertIn(f'data-event-edit-url="{edit_url}"', content)
+        self.assertIn(f'href="{edit_url}" class="event-row__title-link"', content)
+        self.assertIn('class="event-row__delete"', content)
+        self.assertNotIn(">Bearbeiten</a>", content)
+
     def test_webx_can_update_signup_rows(self):
         self.client.login(username="webx", password="testpass123")
 
@@ -803,6 +900,64 @@ class EventSignupManagementTests(TestCase):
         self.assertFalse(self.signup.attending)
         self.assertEqual(self.signup.values[self.column.key], "Kein Essen")
 
+    def test_tampered_hidden_signup_id_is_rejected_server_side(self):
+        other_event = Event.objects.create(
+            title="Anderer Anlass",
+            short_description="Kurz",
+            description="Text",
+            start=self.event.start,
+            end=self.event.end,
+            location="Bern",
+            status="OFF",
+            is_public=True,
+        )
+        other_signup = EventSignup.objects.create(event=other_event, vulgo="Euler", attending=True)
+        self.client.login(username="webx", password="testpass123")
+
+        response = self.client.post(
+            reverse("event-edit", kwargs={"pk": self.event.pk}),
+            {
+                "action": "manage-signups",
+                f"signup-{self.signup.pk}-signup_id": str(other_signup.pk),
+                f"signup-{self.signup.pk}-vulgo": "Manipuliert",
+                f"signup-{self.signup.pk}-attending": "False",
+                f"signup-{self.signup.pk}-col_{self.column.key}": "Kein Essen",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["managed_signup_forms"][0],
+            "signup_id",
+            "Ungültige Anmeldung.",
+        )
+        self.signup.refresh_from_db()
+        other_signup.refresh_from_db()
+        self.assertEqual(self.signup.vulgo, "Newton")
+        self.assertEqual(other_signup.vulgo, "Euler")
+
+    def test_signup_delete_cannot_target_a_different_event(self):
+        other_event = Event.objects.create(
+            title="Fremder Anlass",
+            short_description="Kurz",
+            description="Text",
+            start=self.event.start,
+            end=self.event.end,
+            location="Bern",
+            status="OFF",
+            is_public=True,
+        )
+        other_signup = EventSignup.objects.create(event=other_event, vulgo="Euler", attending=True)
+        self.client.login(username="webx", password="testpass123")
+
+        response = self.client.post(
+            reverse("event-edit", kwargs={"pk": self.event.pk}),
+            {"action": "delete-signup", "delete_signup_id": str(other_signup.pk)},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(EventSignup.objects.filter(pk=other_signup.pk).exists())
+
     def test_webx_can_soft_delete_signup_row(self):
         self.client.login(username="webx", password="testpass123")
 
@@ -821,6 +976,7 @@ class EventSignupManagementTests(TestCase):
 
     def test_webx_can_manage_columns_on_event_form(self):
         self.client.login(username="webx", password="testpass123")
+        custom_deadline = timezone.localtime(self.event.start).replace(hour=18, minute=30, second=0, microsecond=0)
 
         response = self.client.post(
             reverse("event-edit", kwargs={"pk": self.event.pk}),
@@ -831,6 +987,7 @@ class EventSignupManagementTests(TestCase):
                 "description": self.event.description,
                 "start": timezone.localtime(self.event.start).strftime("%Y-%m-%dT%H:%M"),
                 "end": timezone.localtime(self.event.end).strftime("%Y-%m-%dT%H:%M"),
+                "signup_deadline_at": custom_deadline.strftime("%Y-%m-%dT%H:%M"),
                 "location": self.event.location,
                 "status": self.event.status,
                 "is_public": "on",
@@ -860,6 +1017,8 @@ class EventSignupManagementTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
+        self.event.refresh_from_db()
+        self.assertEqual(timezone.localtime(self.event.signup_deadline_at), custom_deadline)
         self.assertTrue(EventSignupColumn.objects.filter(event=self.event, label="Menu").exists())
         self.assertTrue(EventSignupColumn.objects.filter(event=self.event, label="Notiz").exists())
 
@@ -872,4 +1031,7 @@ class EventSignupManagementTests(TestCase):
         content = response.content.decode("utf-8")
         self.assertNotIn("API-Hinweis", content)
         self.assertIn('id="add-signup-column"', content)
+        self.assertIn('name="signup_deadline_at"', content)
+        self.assertIn('type="datetime-local"', content)
+        self.assertIn("Ohne Eingabe endet die Anmeldung am Veranstaltungstag um 00:01 Uhr.", content)
         self.assertIn("Noch keine Zusatzspalten angelegt.", content)

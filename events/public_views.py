@@ -3,11 +3,12 @@ import json
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.http import urlencode
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_safe
 
 from accounts.models import CalendarSubscription
 
@@ -232,7 +233,11 @@ def _parse_boolean(value):
     if value in (True, False):
         return value
     if isinstance(value, int):
-        return bool(value)
+        # JSON booleans may also arrive as 0/1. Other integers are not
+        # boolean values and must not silently become True on the server.
+        if value in (0, 1):
+            return bool(value)
+        return None
     if isinstance(value, str):
         raw = value.strip().lower()
         if raw in {"1", "true", "yes", "on", "ja"}:
@@ -246,11 +251,21 @@ def _normalize_signup_payload(event, payload):
     if not isinstance(payload, dict):
         return None, ("invalid_payload", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
 
-    website = str(payload.get("website", "") or "").strip()
+    allowed_payload_keys = {"vulgo", "attending", "website", "values"}
+    if set(payload) - allowed_payload_keys:
+        return None, ("invalid_payload", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
+
+    raw_website = payload.get("website", "")
+    if raw_website is not None and not isinstance(raw_website, str):
+        return None, ("invalid_payload", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
+    website = (raw_website or "").strip()
     if website:
         return None, ("invalid_request", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
 
-    vulgo = " ".join(str(payload.get("vulgo", "") or "").split())
+    raw_vulgo = payload.get("vulgo", "")
+    if not isinstance(raw_vulgo, str):
+        return None, ("invalid_payload", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
+    vulgo = " ".join(raw_vulgo.split())
     if not vulgo:
         return None, ("missing_vulgo", "Bitte gib ein Vulgo an.", 400)
     if len(vulgo) > 80:
@@ -275,15 +290,20 @@ def _normalize_signup_payload(event, payload):
     for key, column in columns.items():
         raw_value = raw_values.get(key)
         if column.field_type == EventSignupColumn.FIELD_TYPE_CHECKBOX:
-            value = _parse_boolean(raw_value)
-            if value is None:
+            if raw_value is None:
                 value = False
+            else:
+                value = _parse_boolean(raw_value)
+                if value is None:
+                    return None, ("invalid_boolean", f'"{column.label}" ist ungültig.', 400)
             if column.is_required and not value:
                 return None, ("required_field_missing", f'"{column.label}" ist ein Pflichtfeld.', 400)
             cleaned_values[key] = value
             continue
 
-        value = str(raw_value or "").strip()
+        if raw_value is not None and not isinstance(raw_value, str):
+            return None, ("invalid_value", f'"{column.label}" ist ungültig.', 400)
+        value = (raw_value or "").strip()
         max_length = 2000 if column.field_type == EventSignupColumn.FIELD_TYPE_TEXTAREA else 200
         if len(value) > max_length:
             return None, ("value_too_long", f'"{column.label}" ist zu lang.', 400)
@@ -320,24 +340,28 @@ def _authenticate_signup_request(request, slug):
     return None
 
 
+@require_safe
 def legacy_upcoming_events_api(request):
     now = timezone.now()
     queryset = _homepage_queryset().filter(end__gte=now).order_by("start", "title")
     return _build_list_response(request, queryset, include_pagination=False)
 
 
+@require_safe
 def v1_upcoming_events_api(request):
     now = timezone.now()
     queryset = _public_queryset().filter(end__gte=now).order_by("start", "title")
     return _build_list_response(request, queryset, include_pagination=True)
 
 
+@require_safe
 def v1_past_events_api(request):
     now = timezone.now()
     queryset = _public_queryset().filter(end__lt=now).order_by("-start", "-title")
     return _build_list_response(request, queryset, include_pagination=True)
 
 
+@require_safe
 def v1_event_detail_api(request, slug):
     try:
         event = _public_queryset().prefetch_related("signup_columns", "signups").get(slug=slug)
@@ -356,37 +380,44 @@ def v1_event_signup_api(request, slug):
         return auth_error
 
     try:
-        event = _public_queryset().prefetch_related("signup_columns").get(slug=slug)
+        # MariaDB cannot create the conditional unique constraint used for
+        # soft-deleted signups. Locking the parent event serializes all
+        # public signup checks for this event.
+        with transaction.atomic():
+            event = (
+                _public_queryset()
+                .select_for_update()
+                .prefetch_related("signup_columns")
+                .get(slug=slug)
+            )
+
+            # Re-check all mutable security state while the row is locked.
+            if not event.signup_enabled:
+                return _error_response("signup_disabled", "Fuer diesen Anlass sind keine Anmeldungen moeglich.", 409)
+            if event.is_signup_closed:
+                return _error_response("signup_closed", "Der Anmeldeschluss ist bereits abgelaufen.", 409)
+            if _signup_throttled(event.pk, request):
+                return _error_response("rate_limited", "Bitte warte kurz, bevor du das Formular erneut absendest.", 429)
+
+            payload = _parse_request_payload(request)
+            cleaned, error = _normalize_signup_payload(event, payload)
+            if error is not None:
+                code, message, status = error
+                return _error_response(code, message, status)
+
+            normalized_vulgo = EventSignup.normalize_vulgo(cleaned["vulgo"])
+            if EventSignup.objects.filter(event=event, normalized_vulgo=normalized_vulgo).exists():
+                return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
+
+            signup = EventSignup(
+                event=event,
+                vulgo=cleaned["vulgo"],
+                attending=cleaned["attending"],
+                values=cleaned["values"],
+            )
+            signup.save(source=EventSignup.SOURCE_API)
     except Event.DoesNotExist:
         return _error_response("event_not_found", "Dieser Anlass wurde nicht gefunden.", 404)
-
-    if not event.signup_enabled:
-        return _error_response("signup_disabled", "Fuer diesen Anlass sind keine Anmeldungen moeglich.", 409)
-
-    if event.is_signup_closed:
-        return _error_response("signup_closed", "Der Anmeldeschluss ist bereits abgelaufen.", 409)
-
-    if _signup_throttled(event.pk, request):
-        return _error_response("rate_limited", "Bitte warte kurz, bevor du das Formular erneut absendest.", 429)
-
-    payload = _parse_request_payload(request)
-    cleaned, error = _normalize_signup_payload(event, payload)
-    if error is not None:
-        code, message, status = error
-        return _error_response(code, message, status)
-
-    normalized_vulgo = EventSignup.normalize_vulgo(cleaned["vulgo"])
-    if EventSignup.objects.filter(event=event, normalized_vulgo=normalized_vulgo).exists():
-        return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
-
-    try:
-        signup = EventSignup(
-            event=event,
-            vulgo=cleaned["vulgo"],
-            attending=cleaned["attending"],
-            values=cleaned["values"],
-        )
-        signup.save(source=EventSignup.SOURCE_API)
     except IntegrityError:
         return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
 
@@ -406,6 +437,7 @@ def v1_event_signup_api(request, slug):
     )
 
 
+@require_safe
 def v1_calendar_feed(request):
     service = CalendarFeedService()
     result = service.build_public_feed()
@@ -417,10 +449,12 @@ def v1_calendar_feed(request):
     )
 
 
+@require_safe
 def public_calendar_feed(request):
     return v1_calendar_feed(request)
 
 
+@require_safe
 def public_event_calendar(request, slug):
     try:
         event = Event.objects.get(slug=slug, is_public=True)
@@ -437,6 +471,7 @@ def public_event_calendar(request, slug):
     )
 
 
+@require_safe
 def private_calendar_feed(request, token):
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     try:

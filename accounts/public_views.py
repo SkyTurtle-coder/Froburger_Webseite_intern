@@ -1,5 +1,6 @@
 from django.core.cache import cache
 from django.http import JsonResponse
+from django.views.decorators.http import require_safe
 
 from .public_members import build_public_members_payload
 from .throttling import client_ip
@@ -24,6 +25,7 @@ def _public_members_rate_limited(request):
     return count > PUBLIC_MEMBERS_RATE_LIMIT_MAX
 
 
+@require_safe
 def v1_public_members_api(request):
     if _public_members_rate_limited(request):
         return JsonResponse({"detail": "Rate limit exceeded."}, status=429)

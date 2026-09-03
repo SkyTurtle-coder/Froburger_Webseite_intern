@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 from unittest import skip
 from unittest.mock import patch
 
@@ -27,11 +28,12 @@ from PIL import Image
 
 from accounts import throttling
 from accounts.auth_backends import EmailOrVulgoBackend
-from accounts.forms import UserWithProfileCreationForm
+from accounts.forms import MAX_MEMBER_CSV_FILE_SIZE, UserWithProfileCreationForm, validate_profile_photo
 from accounts.management.commands.sync_public_members_page import validate_public_member_media_urls
 from accounts.models import MemorialEntry, Profile, Role
 from accounts.public_members import build_public_members_payload, is_public_member
 from accounts.public_media import get_public_media_base_url
+from accounts.tokens import account_activation_token_generator
 from documents.models import Document, DocumentFolder, FolderScope
 from events.models import Event
 
@@ -222,6 +224,12 @@ class PermissionFlowTests(TestCase):
         self.assertContains(response, 'name="roles"', html=False)
         self.assertContains(response, 'type="checkbox"', html=False)
         self.assertNotContains(response, '<select name="roles"', html=False)
+
+    def test_anonymous_profile_edit_redirects_to_login(self):
+        response = self.client.get(reverse("profile-edit", kwargs={"pk": self.member.profile.pk}))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
 
     def test_admin_profile_form_uses_human_role_labels(self):
         self.client.login(username="admin", password="testpass123")
@@ -420,6 +428,54 @@ class MemberCsvImportTests(TestCase):
 
         self.assertEqual(user.email, "manual@example.com")
         self.assertTrue(user.username.startswith("mitglied-"))
+
+    def test_manual_member_creation_requires_unique_email_on_server(self):
+        missing_email = UserWithProfileCreationForm(
+            data={
+                "email": "",
+                "first_name": "Manuel",
+                "last_name": "Beispiel",
+                "password1": "SicheresTestpasswort123!",
+                "password2": "SicheresTestpasswort123!",
+            }
+        )
+        duplicate_email = UserWithProfileCreationForm(
+            data={
+                "email": " VORHANDEN@example.com ",
+                "first_name": "Manuel",
+                "last_name": "Beispiel",
+                "password1": "SicheresTestpasswort123!",
+                "password2": "SicheresTestpasswort123!",
+            }
+        )
+
+        self.assertFalse(missing_email.is_valid())
+        self.assertIn("email", missing_email.errors)
+        self.assertFalse(duplicate_email.is_valid())
+        self.assertFormError(duplicate_email, "email", "Für diese E-Mail-Adresse besteht bereits ein Konto.")
+
+    def test_csv_import_size_limit_is_checked_on_server(self):
+        self.client.login(username="csv-admin", password="testpass123")
+        upload = SimpleUploadedFile(
+            "mitglieder.csv",
+            b"x" * (MAX_MEMBER_CSV_FILE_SIZE + 1),
+            content_type="text/csv",
+        )
+        response = self.client.post(reverse("member-import"), {"csv_file": upload})
+        self.assertFormError(response.context["form"], "csv_file", "Die CSV-Datei darf höchstens 5 MB gross sein.")
+
+    def test_profile_photo_resource_limits_are_checked_on_server(self):
+        oversized_file = SimpleNamespace(size=20 * 1024 * 1024 + 1, _committed=False)
+        oversized_dimensions = SimpleNamespace(
+            size=100,
+            image=SimpleNamespace(width=10_000, height=5_000),
+            _committed=False,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Das Profilfoto darf höchstens 20 MB gross sein."):
+            validate_profile_photo(oversized_file)
+        with self.assertRaisesMessage(ValidationError, "Das Profilfoto hat zu viele Bildpunkte."):
+            validate_profile_photo(oversized_dimensions)
 
     def test_csv_import_creates_only_new_members_and_reports_skipped_rows(self):
         self.client.login(username="csv-admin", password="testpass123")
@@ -734,6 +790,11 @@ class PublicMembersApiRateLimitTests(TestCase):
 
     def setUp(self):
         cache.clear()
+
+    def test_read_only_endpoint_rejects_post(self):
+        response = self.client.post(reverse("api-v1-public-members"))
+
+        self.assertEqual(response.status_code, 405)
 
     def test_requests_within_limit_all_succeed(self):
         from accounts.public_views import PUBLIC_MEMBERS_RATE_LIMIT_MAX
@@ -1663,6 +1724,161 @@ class PasswordResetAndSessionPolicyTests(TestCase):
         self.assertEqual(reissued_max_age, self.client.session.get_expiry_age())
 
 
+class AccountActivationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.provisioned_user = User.objects.create_user(
+            username="provisioned-user",
+            email="provisioned@example.org",
+        )
+        cls.provisioned_user.set_unusable_password()
+        cls.provisioned_user.save(update_fields=["password"])
+
+        cls.inactive_user = User.objects.create_user(
+            username="inactive-activation-user",
+            email="inactive-activation@example.org",
+            is_active=False,
+        )
+        cls.inactive_user.set_unusable_password()
+        cls.inactive_user.save(update_fields=["password"])
+
+        User.objects.create_user(username="duplicate-activation-1", email="duplicate-activation@example.org")
+        User.objects.create_user(username="duplicate-activation-2", email="duplicate-activation@example.org")
+
+    def setUp(self):
+        cache.clear()
+        mail.outbox = []
+
+    def _request_activation(self, email_address, **extra):
+        return self.client.post(reverse("account_activation"), {"email": email_address}, follow=True, **extra)
+
+    @staticmethod
+    def _extract_activation_link(message):
+        match = re.search(r"https?://\S+", message.body)
+        return match.group(0) if match else ""
+
+    def _issue_activation_mail(self, **request_kwargs):
+        response = self._request_activation(self.provisioned_user.email, **request_kwargs)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        return response, mail.outbox[0], self._extract_activation_link(mail.outbox[0])
+
+    def test_activation_routes_and_login_link_are_available(self):
+        self.assertEqual(self.client.get(reverse("account_activation")).status_code, 200)
+        self.assertTrue(reverse("account_activation_done"))
+        self.assertTrue(reverse("account_activate", kwargs={"uidb64": "abc", "token": "activation-token"}))
+        self.assertTrue(reverse("account_activation_complete"))
+
+        login_response = self.client.get(reverse("login"))
+        self.assertContains(login_response, reverse("account_activation"))
+        self.assertContains(login_response, "Konto erstmals aktivieren")
+
+    def test_provisioned_account_with_unusable_password_receives_mail(self):
+        response = self._request_activation(self.provisioned_user.email)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_unknown_inactive_and_duplicate_email_share_neutral_result(self):
+        addresses = (
+            "unknown-activation@example.org",
+            self.inactive_user.email,
+            "duplicate-activation@example.org",
+        )
+        for address in addresses:
+            with self.subTest(address=address):
+                mail.outbox = []
+                response = self._request_activation(address)
+                self.assertContains(
+                    response,
+                    "Falls ein aktives Konto mit dieser E-Mail-Adresse vorbereitet wurde",
+                )
+                self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(
+        ALLOWED_HOSTS=["testserver", "intern.avfroburger.ch", "internal.invalid"],
+        USE_X_FORWARDED_HOST=True,
+        SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+        DEFAULT_FROM_EMAIL="AV Froburger Intern <noreply@intern-avfroburger.ch>",
+    )
+    def test_activation_mail_uses_branded_html_and_https_link(self):
+        _response, message, link = self._issue_activation_mail(
+            HTTP_HOST="internal.invalid",
+            HTTP_X_FORWARDED_HOST="intern.avfroburger.ch",
+            HTTP_X_FORWARDED_PROTO="https",
+        )
+
+        self.assertEqual(message.from_email, "AV Froburger Intern <noreply@intern-avfroburger.ch>")
+        self.assertEqual(message.subject, "AV Froburger Intern: Konto aktivieren")
+        self.assertTrue(link.startswith("https://intern.avfroburger.ch/accounts/activate/"))
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertEqual(message.alternatives[0][1], "text/html")
+        self.assertIn("Konto aktivieren", message.alternatives[0][0])
+
+    def test_valid_activation_link_sets_first_password(self):
+        _response, _message, link = self._issue_activation_mail()
+
+        get_response = self.client.get(link, follow=True)
+        self.assertEqual(get_response.status_code, 200)
+        self.assertContains(get_response, "Eigenes Passwort festlegen")
+        final_path = get_response.request["PATH_INFO"]
+
+        post_response = self.client.post(
+            final_path,
+            {
+                "new_password1": "AktivierungPasswort123!",
+                "new_password2": "AktivierungPasswort123!",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(post_response.status_code, 200)
+        self.assertContains(post_response, "Konto aktiviert")
+        self.provisioned_user.refresh_from_db()
+        self.assertTrue(self.provisioned_user.check_password("AktivierungPasswort123!"))
+        self.assertTrue(
+            self.client.login(
+                username=self.provisioned_user.email,
+                password="AktivierungPasswort123!",
+            )
+        )
+
+    def test_activation_link_cannot_be_reused(self):
+        _response, _message, link = self._issue_activation_mail()
+        get_response = self.client.get(link, follow=True)
+        final_path = get_response.request["PATH_INFO"]
+        self.client.post(
+            final_path,
+            {
+                "new_password1": "AktivierungPasswort123!",
+                "new_password2": "AktivierungPasswort123!",
+            },
+            follow=True,
+        )
+
+        reuse_response = self.client.get(link, follow=True)
+
+        self.assertContains(reuse_response, "Dieser Aktivierungslink ist ungültig oder abgelaufen.")
+
+    def test_password_reset_token_is_not_valid_for_activation(self):
+        token = default_token_generator.make_token(self.provisioned_user)
+        uid = urlsafe_base64_encode(force_bytes(self.provisioned_user.pk))
+        activation_url = reverse("account_activate", kwargs={"uidb64": uid, "token": token})
+
+        response = self.client.get(activation_url, follow=True)
+
+        self.assertContains(response, "Dieser Aktivierungslink ist ungültig oder abgelaufen.")
+
+    def test_activation_token_is_not_valid_for_password_reset(self):
+        token = account_activation_token_generator.make_token(self.provisioned_user)
+        uid = urlsafe_base64_encode(force_bytes(self.provisioned_user.pk))
+        reset_url = reverse("password_reset_confirm", kwargs={"uidb64": uid, "token": token})
+
+        response = self.client.get(reset_url, follow=True)
+
+        self.assertContains(response, "Dieser Link ist ungültig oder abgelaufen.")
+
+
 class ProfileMembershipModelTests(TestCase):
     def test_profile_without_entry_and_exit_is_valid(self):
         user = User.objects.create_user(username="model-valid", password="testpass123")
@@ -1829,6 +2045,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
                 "exit_year": "2026",
                 "exit_semester": "FS",
                 "death_date": "2026-07-17",
+                "roles": [str(self.admin_role.pk)],
             },
             follow=True,
         )
@@ -1838,6 +2055,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         self.assertIsNone(self.member.profile.exit_year)
         self.assertEqual(self.member.profile.exit_semester, "")
         self.assertIsNone(self.member.profile.death_date)
+        self.assertFalse(self.member.profile.roles.filter(pk=self.admin_role.pk).exists())
 
     def test_death_date_not_rendered_in_normal_profile_form(self):
         self.client.login(username="profile-member", password="testpass123")
