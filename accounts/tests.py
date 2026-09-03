@@ -417,17 +417,17 @@ class MemberCsvImportTests(TestCase):
                 "first_name": "Manuel",
                 "last_name": "Beispiel",
                 "vulgo": "Muster",
-                "password1": "SicheresTestpasswort123!",
-                "password2": "SicheresTestpasswort123!",
             }
         )
 
         self.assertNotIn("username", form.fields)
+        self.assertNotIn("password1", form.fields)
         self.assertTrue(form.is_valid(), form.errors)
         user = form.save()
 
         self.assertEqual(user.email, "manual@example.com")
         self.assertTrue(user.username.startswith("mitglied-"))
+        self.assertFalse(user.has_usable_password())
 
     def test_manual_member_creation_requires_unique_email_on_server(self):
         missing_email = UserWithProfileCreationForm(
@@ -435,8 +435,6 @@ class MemberCsvImportTests(TestCase):
                 "email": "",
                 "first_name": "Manuel",
                 "last_name": "Beispiel",
-                "password1": "SicheresTestpasswort123!",
-                "password2": "SicheresTestpasswort123!",
             }
         )
         duplicate_email = UserWithProfileCreationForm(
@@ -444,8 +442,6 @@ class MemberCsvImportTests(TestCase):
                 "email": " VORHANDEN@example.com ",
                 "first_name": "Manuel",
                 "last_name": "Beispiel",
-                "password1": "SicheresTestpasswort123!",
-                "password2": "SicheresTestpasswort123!",
             }
         )
 

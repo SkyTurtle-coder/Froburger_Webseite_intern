@@ -1,6 +1,6 @@
 from django import forms
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm, UserCreationForm
+from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
 from django.contrib.auth.models import User
 from django.utils.crypto import get_random_string
 
@@ -94,7 +94,14 @@ class ProfileBaseForm(forms.ModelForm):
         return validate_profile_photo(self.cleaned_data.get("photo"))
 
 
-class UserWithProfileCreationForm(UserCreationForm):
+class UserWithProfileCreationForm(forms.ModelForm):
+    """Provision a member account without a password.
+
+    The member sets their own first password through the account-activation
+    email link (see AccountActivationForm) rather than an admin choosing one
+    on their behalf.
+    """
+
     email = forms.EmailField(required=True)
     first_name = forms.CharField(label="Vorname", max_length=150)
     last_name = forms.CharField(label="Name", max_length=150)
@@ -143,9 +150,9 @@ class UserWithProfileCreationForm(UserCreationForm):
         widget=forms.CheckboxSelectMultiple,
     )
 
-    class Meta(UserCreationForm.Meta):
+    class Meta:
         model = User
-        fields = ("email", "password1", "password2")
+        fields = ("email",)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -169,6 +176,7 @@ class UserWithProfileCreationForm(UserCreationForm):
                 user.username = username
                 break
         user.email = self.cleaned_data["email"]
+        user.set_unusable_password()
         if commit:
             user.save()
             profile = user.profile
