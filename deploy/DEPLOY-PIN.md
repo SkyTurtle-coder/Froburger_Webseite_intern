@@ -5,6 +5,22 @@ bei der Prüfung mit `Permission denied` abgewiesen. Serverpfade stammen aus den
 Projekt-Runbooks. Lokale, nicht committete Änderungen werden nicht übertragen.
 Kein Git-Pull auf dem Server erforderlich; das Deployment erfolgt mit Git-Archiven.
 
+## Bereits hochgeladene Pakete fortsetzen
+
+Für das bereits geprüfte Release `avf-pin-20260909-003225` in einer lokalen
+PowerShell ausführen (nicht innerhalb einer SSH-Sitzung):
+
+```powershell
+Set-Location 'C:\Users\phili\Local Sites\av-froburger\app'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\intern\deploy\Continue-PinDeployment.ps1 -Release avf-pin-20260909-003225 -Deploy
+```
+
+Der Helfer überträgt die Bash-Skripte als Dateien und führt die drei Server-Schritte
+nacheinander aus. Jeder Schritt setzt seine eigenen Variablen. Dadurch entfallen
+Platzhalter und mehrzeiliges Einfügen in SSH-Terminals. Ohne `-Deploy` werden nur
+Zugänge, Pakete und Pfade geprüft. Bei Fehlern stoppt der Helfer; dann die konkrete
+Fehlermeldung prüfen und gegebenenfalls den Rollback ausführen.
+
 Produktiv: Django `/srv/avf-intern/app`, WordPress
 `/home/avfrobur/www/gamma.avfroburger.ch`. **Nicht gegen den Test-Webroot ausführen:**
 Test und Produktion teilen laut Runbook die WordPress-Datenbank.
@@ -59,8 +75,13 @@ Die Archive ersetzen nur die sechs bzw. vier aufgelisteten Dateien.
 Lokal öffnen: `ssh avfroburger-hostpoint`. Dann dort:
 
 ```bash
+(
 set -euo pipefail
 release=avf-pin-YYYYMMDD-HHMMSS
+if [[ ! "$release" =~ ^avf-pin-[0-9]{8}-[0-9]{6}$ ]]; then
+  printf 'Bitte den echten Release-Namen einsetzen; YYYYMMDD-HHMMSS ist ein Platzhalter.\n' >&2
+  exit 1
+fi
 wp_root=/home/avfrobur/www/gamma.avfroburger.ch
 wp_backup=/home/avfrobur/backups/$release
 wp_stage=/home/avfrobur/deploy-tmp/$release
@@ -79,9 +100,10 @@ tar -czf "$wp_backup/public-before.tar.gz" \
   wp-content/plugins/avf-events-integration/assets/css/events-lists.css
 test -s "$wp_backup/public-before.tar.gz"
 wp maintenance-mode activate
+)
 ```
 
-Diese Shell offen lassen und mit Schritt 3 fortfahren. WordPress-Wartungsmodus
+Nach erfolgreichem Abschluss mit Schritt 3 fortfahren. Jeder Block setzt seine Variablen selbst. WordPress-Wartungsmodus
 läuft nach etwa zehn Minuten ab; beide Updates unmittelbar nacheinander durchführen.
 
 ## 3. Django-SSH-Shell: Datenbankbackup, Dateien, Migration und Neustart
@@ -91,8 +113,13 @@ Dann dort ausführen. `systemd-run` lädt dieselbe EnvironmentFile wie der Diens
 die Env-Datei wird nicht als Shell-Skript ausgeführt und keine Secrets ausgegeben.
 
 ```bash
+(
 set -euo pipefail
 release=avf-pin-YYYYMMDD-HHMMSS
+if [[ ! "$release" =~ ^avf-pin-[0-9]{8}-[0-9]{6}$ ]]; then
+  printf 'Bitte den echten Release-Namen einsetzen; YYYYMMDD-HHMMSS ist ein Platzhalter.\n' >&2
+  exit 1
+fi
 app=/srv/avf-intern/app
 backup=/srv/avf-intern/backups/$release
 archive=/tmp/$release-intern.tar.gz
@@ -134,6 +161,7 @@ sudo systemctl start avf-intern
 sudo systemctl is-active --quiet avf-intern
 curl --retry 5 --retry-connrefused --retry-delay 2 --fail --silent --show-error \
   https://intern.avfroburger.ch/healthz/
+)
 ```
 
 Falls bereits spätere events-Migrationen installiert sind, nicht zu 0009 zurückmigrieren:
@@ -145,6 +173,16 @@ Bei Fehler während Schritt 3 bleibt WordPress im Wartungsmodus; siehe Rollback 
 Erst nach erfolgreichem Django-Neustart:
 
 ```bash
+(
+set -euo pipefail
+release=avf-pin-YYYYMMDD-HHMMSS
+if [[ ! "$release" =~ ^avf-pin-[0-9]{8}-[0-9]{6}$ ]]; then
+  printf 'Bitte den echten Release-Namen einsetzen; YYYYMMDD-HHMMSS ist ein Platzhalter.\n' >&2
+  exit 1
+fi
+wp_root=/home/avfrobur/www/gamma.avfroburger.ch
+wp_backup=/home/avfrobur/backups/$release
+wp_stage=/home/avfrobur/deploy-tmp/$release
 cd "$wp_root"
 tar -xzf "$wp_stage/public.tar.gz" -C "$wp_root"
 chmod 644 \
@@ -158,6 +196,7 @@ wp eval 'AVF_Events_API_Client::clear_cache();'
 wp maintenance-mode deactivate
 curl --fail --silent --show-error "https://www.avfroburger.ch/anlaesse/froburgfahrt/?pin_check=$(date +%s)" \
   | grep -F 'Bestehende Anmeldung bearbeiten'
+)
 ```
 
 Ein vorgeschalteter Seiten-/Hostingcache muss gegebenenfalls gezielt für diese Seite
@@ -173,6 +212,16 @@ Datenbankbackups: Das könnte nachträgliche Änderungen oder PIN-Hashes verlier
 In der Django-Shell:
 
 ```bash
+(
+set -euo pipefail
+release=avf-pin-YYYYMMDD-HHMMSS
+if [[ ! "$release" =~ ^avf-pin-[0-9]{8}-[0-9]{6}$ ]]; then
+  printf 'Bitte den echten Release-Namen einsetzen; YYYYMMDD-HHMMSS ist ein Platzhalter.\n' >&2
+  exit 1
+fi
+app=/srv/avf-intern/app
+backup=/srv/avf-intern/backups/$release
+migration=events/migrations/0009_eventsignup_pin_failed_attempts_eventsignup_pin_hash_and_more.py
 sudo systemctl stop avf-intern
 sudo tar -xzf "$backup/code-before.tar.gz" -C "$app"
 if sudo test -f "$backup/migration-before.py"; then
@@ -180,15 +229,27 @@ if sudo test -f "$backup/migration-before.py"; then
 fi
 sudo systemctl start avf-intern
 sudo systemctl is-active --quiet avf-intern
+)
 ```
 
 In der WordPress-Shell:
 
 ```bash
+(
+set -euo pipefail
+release=avf-pin-YYYYMMDD-HHMMSS
+if [[ ! "$release" =~ ^avf-pin-[0-9]{8}-[0-9]{6}$ ]]; then
+  printf 'Bitte den echten Release-Namen einsetzen; YYYYMMDD-HHMMSS ist ein Platzhalter.\n' >&2
+  exit 1
+fi
+wp_root=/home/avfrobur/www/gamma.avfroburger.ch
+wp_backup=/home/avfrobur/backups/$release
+wp_stage=/home/avfrobur/deploy-tmp/$release
 cd "$wp_root"
 tar -xzf "$wp_backup/public-before.tar.gz" -C "$wp_root"
 wp eval 'AVF_Events_API_Client::clear_cache();'
 wp maintenance-mode deactivate
+)
 ```
 
 ## Optional: zusätzlich auf GitHub sichern
