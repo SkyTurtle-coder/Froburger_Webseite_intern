@@ -122,6 +122,11 @@ EventSignupColumnFormSet = inlineformset_factory(
 
 
 class EventSignupPublicForm(forms.Form):
+    pin = forms.RegexField(
+        regex=r"\A[0-9]{4,6}\Z", strip=False, label="PIN zum späteren Bearbeiten",
+        widget=forms.PasswordInput(attrs={"inputmode": "numeric", "pattern": "[0-9]{4,6}", "minlength": 4, "maxlength": 6, "autocomplete": "new-password"}),
+        help_text="4 bis 6 Ziffern. Bitte merken. PIN vergessen? Bitte kontaktiere den Admin.",
+    )
     vulgo = forms.CharField(label="Vulgo", max_length=80)
     attending = forms.TypedChoiceField(
         label="Anwesend",
@@ -203,6 +208,11 @@ class EventSignupPublicForm(forms.Form):
 
 
 class EventSignupManageForm(forms.Form):
+    new_pin = forms.RegexField(
+        regex=r"\A[0-9]{4,6}\Z", strip=False, required=False, label="Neuen PIN setzen",
+        widget=forms.PasswordInput(attrs={"inputmode": "numeric", "pattern": "[0-9]{4,6}", "minlength": 4, "maxlength": 6, "autocomplete": "new-password"}),
+        help_text="4 bis 6 Ziffern. Leer lassen, um den bisherigen PIN beizubehalten. Auch für bestehende Anmeldungen ohne PIN.",
+    )
     signup_id = forms.IntegerField(widget=forms.HiddenInput)
     vulgo = forms.CharField(label="Vulgo", max_length=80)
     attending = forms.TypedChoiceField(

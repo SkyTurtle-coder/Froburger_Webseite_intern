@@ -172,14 +172,17 @@ class EventUpdateView(RoleAccessMixin, UpdateView):
             if not duplicate_detected:
                 try:
                     with transaction.atomic():
+                        Event.objects.select_for_update().get(pk=self.object.pk)
                         for form in signup_forms:
-                            signup = form.signup
+                            signup = self.object.signups.select_for_update().get(pk=form.signup.pk)
                             if form.cleaned_data.get("delete"):
                                 signup.delete(actor=self.request.user, source=EventSignup.SOURCE_INTERNAL)
                                 continue
                             signup.vulgo = form.cleaned_data["vulgo"]
                             signup.attending = form.cleaned_data["attending"]
                             signup.values = form.build_values()
+                            if form.cleaned_data.get("new_pin"):
+                                signup.set_pin(form.cleaned_data["new_pin"])
                             signup.save(actor=self.request.user, source=EventSignup.SOURCE_INTERNAL)
                 except (IntegrityError, ValidationError):
                     signup_forms[0].add_error(None, "Die Anmeldungen konnten nicht gespeichert werden.")
@@ -250,6 +253,7 @@ class PublicEventDetailView(DetailView):
                     attending=form.cleaned_data["attending"],
                     values=form.build_values(),
                 )
+                signup.set_pin(form.cleaned_data["pin"])
                 signup.save(source=EventSignup.SOURCE_PUBLIC_FORM)
             except IntegrityError:
                 form.add_error("vulgo", "Dieses Vulgo ist für diesen Anlass bereits eingetragen.")

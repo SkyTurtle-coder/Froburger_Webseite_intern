@@ -258,6 +258,9 @@ class EventSignup(models.Model):
         help_text="Steuert, ob dieser Eintrag auf der öffentlichen Anlassseite erscheint.",
     )
     values = models.JSONField(default=dict, blank=True)
+    pin_hash = models.CharField(max_length=128, blank=True, editable=False)
+    pin_failed_attempts = models.PositiveSmallIntegerField(default=0, editable=False)
+    pin_locked_until = models.DateTimeField(null=True, blank=True, editable=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -291,6 +294,15 @@ class EventSignup(models.Model):
         compact = re.sub(r"\s+", " ", (value or "").strip())
         return compact.casefold()
 
+    def set_pin(self, pin):
+        from django.contrib.auth.hashers import make_password
+
+        if not isinstance(pin, str) or re.fullmatch(r"[0-9]{4,6}", pin) is None:
+            raise ValidationError("Der PIN muss aus 4 bis 6 Ziffern bestehen.")
+        self.pin_hash = make_password(pin)
+        self.pin_failed_attempts = 0
+        self.pin_locked_until = None
+
     def clean(self):
         errors = {}
         clean_vulgo = re.sub(r"\s+", " ", (self.vulgo or "").strip())
@@ -314,6 +326,7 @@ class EventSignup(models.Model):
         previous = None
         if not is_create and self.pk:
             previous = EventSignup.all_objects.filter(pk=self.pk).values(
+                "pin_hash",
                 "vulgo",
                 "normalized_vulgo",
                 "attending",
@@ -341,6 +354,8 @@ class EventSignup(models.Model):
             return result
 
         changes = self._build_changes(previous)
+        if previous["pin_hash"] != self.pin_hash:
+            changes["pin_reset"] = [None, True]
         if not changes:
             return result
 

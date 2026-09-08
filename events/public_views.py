@@ -1,13 +1,17 @@
 import hashlib
 import json
+import re
+from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.http import Http404, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.http import urlencode
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_safe
 
 from accounts.models import CalendarSubscription
@@ -251,7 +255,7 @@ def _normalize_signup_payload(event, payload):
     if not isinstance(payload, dict):
         return None, ("invalid_payload", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
 
-    allowed_payload_keys = {"vulgo", "attending", "website", "values"}
+    allowed_payload_keys = {"vulgo", "attending", "website", "values", "pin", "operation"}
     if set(payload) - allowed_payload_keys:
         return None, ("invalid_payload", "Die Anmeldung konnte nicht verarbeitet werden.", 400)
 
@@ -371,6 +375,7 @@ def v1_event_detail_api(request, slug):
 
 
 @csrf_exempt
+@never_cache
 def v1_event_signup_api(request, slug):
     if request.method != "POST":
         return _error_response("method_not_allowed", "Nur POST ist erlaubt.", 405)
@@ -396,10 +401,16 @@ def v1_event_signup_api(request, slug):
                 return _error_response("signup_disabled", "Fuer diesen Anlass sind keine Anmeldungen moeglich.", 409)
             if event.is_signup_closed:
                 return _error_response("signup_closed", "Der Anmeldeschluss ist bereits abgelaufen.", 409)
+            payload = _parse_request_payload(request)
+            if not isinstance(payload, dict):
+                return _error_response("invalid_payload", "Ungültige Anfrage.", 400)
+            operation = payload.get("operation", "create")
+            if operation in ("read", "update"):
+                return _edit_signup(event, payload, operation)
+            if operation != "create":
+                return _error_response("invalid_payload", "Ungültige Anfrage.", 400)
             if _signup_throttled(event.pk, request):
                 return _error_response("rate_limited", "Bitte warte kurz, bevor du das Formular erneut absendest.", 429)
-
-            payload = _parse_request_payload(request)
             cleaned, error = _normalize_signup_payload(event, payload)
             if error is not None:
                 code, message, status = error
@@ -409,12 +420,17 @@ def v1_event_signup_api(request, slug):
             if EventSignup.objects.filter(event=event, normalized_vulgo=normalized_vulgo).exists():
                 return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
 
+            pin = payload.get("pin")
+            if not isinstance(pin, str) or re.fullmatch(r"[0-9]{4,6}", pin) is None:
+                return _error_response("invalid_pin", "Der PIN muss aus 4 bis 6 Ziffern bestehen.", 400)
+
             signup = EventSignup(
                 event=event,
                 vulgo=cleaned["vulgo"],
                 attending=cleaned["attending"],
                 values=cleaned["values"],
             )
+            signup.set_pin(pin)
             signup.save(source=EventSignup.SOURCE_API)
     except Event.DoesNotExist:
         return _error_response("event_not_found", "Dieser Anlass wurde nicht gefunden.", 404)
@@ -435,6 +451,51 @@ def v1_event_signup_api(request, slug):
         },
         status=201,
     )
+
+
+def _edit_signup(event, payload, operation):
+    """Called inside the event transaction; never exposes PINs or hashes."""
+    allowed = {"operation", "vulgo", "pin", "website"}
+    if operation == "update":
+        allowed |= {"attending", "values"}
+    vulgo, pin = payload.get("vulgo"), payload.get("pin")
+    if (set(payload) - allowed or not isinstance(vulgo, str) or len(vulgo) > 80
+            or not isinstance(pin, str) or re.fullmatch(r"[0-9]{4,6}", pin) is None
+            or payload.get("website", "")):
+        return _error_response("invalid_credentials", "Vulgo oder PIN ungültig. PIN vergessen? Bitte kontaktiere den Admin.", 403)
+    signup = event.signups.select_for_update().filter(
+        normalized_vulgo=EventSignup.normalize_vulgo(vulgo)
+    ).first()
+    now = timezone.now()
+    if signup and signup.pin_locked_until and signup.pin_locked_until > now:
+        return _error_response("pin_locked", "Zu viele Fehlversuche. Bitte versuche es in 15 Minuten erneut oder kontaktiere den Admin.", 429)
+    if not signup or not signup.pin_hash or not check_password(pin, signup.pin_hash):
+        if signup and signup.pin_hash:
+            attempts = 0 if signup.pin_locked_until else signup.pin_failed_attempts
+            attempts += 1
+            EventSignup.objects.filter(pk=signup.pk).update(
+                pin_failed_attempts=attempts,
+                pin_locked_until=now + timedelta(minutes=15) if attempts >= 5 else None,
+            )
+        return _error_response("invalid_credentials", "Vulgo oder PIN ungültig. PIN vergessen? Bitte kontaktiere den Admin.", 403)
+    EventSignup.objects.filter(pk=signup.pk).update(pin_failed_attempts=0, pin_locked_until=None)
+    signup.pin_failed_attempts = 0
+    signup.pin_locked_until = None
+    if operation == "update":
+        cleaned, error = _normalize_signup_payload(event, payload)
+        if error:
+            return _error_response(*error)
+        signup.attending = cleaned["attending"]
+        # Retain data for columns that an administrator has deactivated.
+        signup.values = {**signup.values, **cleaned["values"]}
+        signup.save(source=EventSignup.SOURCE_API)
+    keys = {column.key for column in event.active_signup_columns()}
+    return JsonResponse({
+        "success": True,
+        "code": "signup_updated" if operation == "update" else "signup_loaded",
+        "signup": {"vulgo": signup.vulgo, "attending": signup.attending,
+                   "values": {key: value for key, value in signup.values.items() if key in keys}},
+    })
 
 
 @require_safe

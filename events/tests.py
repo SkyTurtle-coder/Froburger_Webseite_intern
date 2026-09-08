@@ -481,6 +481,7 @@ class EventPublicSignupApiTests(TestCase):
         cache.clear()
 
     def _post(self, payload):
+        payload = {"pin": "01234", **payload}
         body = json.dumps(payload).encode("utf-8")
         timestamp = str(int(timezone.now().timestamp()))
         signature = signing.compute_signature(TEST_SIGNUP_SECRET, self.event.slug, timestamp, body)
@@ -676,7 +677,7 @@ class EventSignupApiAuthenticationTests(TestCase):
         cache.clear()
 
     def _body(self, vulgo="Riemann"):
-        return json.dumps({"vulgo": vulgo, "attending": True, "values": {}}).encode("utf-8")
+        return json.dumps({"vulgo": vulgo, "attending": True, "values": {}, "pin": "01234"}).encode("utf-8")
 
     def _post(self, body, headers=None):
         return self.client.post(
