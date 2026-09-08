@@ -12,6 +12,9 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "$Exe fehlgeschlagen (Exit $LASTEXITCODE). Deployment gestoppt." }
 }
 $sshKey = Join-Path $env:USERPROFILE '.ssh/id_ed25519'
+if (-not (Test-Path -LiteralPath $sshKey -PathType Leaf)) {
+    throw "Lokaler SSH-Schluessel fehlt: $sshKey"
+}
 $backendTarget = 'debian@179.237.81.250'
 $wordpressTarget = 'avfroburger-hostpoint'
 $wpStage = "/home/avfrobur/deploy-tmp/$Release"
@@ -24,10 +27,43 @@ foreach ($name in @('wordpress-prepare.sh', 'backend-install.sh', 'wordpress-ins
 if (-not $Deploy) {
     Write-Host "Release: $Release"
     Write-Host 'Geprueft werden nur SSH-Zugang, Pakete und Serverpfade.'
-    Invoke-Checked ssh @('-i', $sshKey, $backendTarget,
-        "test -s /tmp/$Release-intern.tar.gz && test -f /srv/avf-intern/app/manage.py && systemctl is-active avf-intern && echo BACKEND_OK")
-    Invoke-Checked ssh @($wordpressTarget,
-        "test -s $wpStage/public.tar.gz && test -f /home/avfrobur/www/gamma.avfroburger.ch/wp-config.php && echo WORDPRESS_OK")
+    $backendCheck = @"
+echo SSH_BACKEND_OK
+if ! test -s /tmp/$Release-intern.tar.gz; then
+  echo FEHLER_ARCHIV_FEHLT_ODER_LEER: /tmp/$Release-intern.tar.gz
+  exit 11
+fi
+echo BACKEND_ARCHIV_OK
+if ! sudo -n true; then
+  echo FEHLER_SUDO_BENOETIGT_ANMELDUNG
+  exit 14
+fi
+if ! sudo -n test -f /srv/avf-intern/app/manage.py; then
+  echo FEHLER_BACKEND_PFAD: /srv/avf-intern/app/manage.py
+  exit 12
+fi
+echo BACKEND_PFAD_OK
+if ! systemctl is-active avf-intern; then
+  echo FEHLER_DIENST_NICHT_AKTIV: avf-intern
+  exit 13
+fi
+echo BACKEND_OK
+"@
+    $wordpressCheck = @"
+echo SSH_WORDPRESS_OK
+if ! test -s $wpStage/public.tar.gz; then
+  echo FEHLER_ARCHIV_FEHLT_ODER_LEER: $wpStage/public.tar.gz
+  exit 21
+fi
+echo WORDPRESS_ARCHIV_OK
+if ! test -f /home/avfrobur/www/gamma.avfroburger.ch/wp-config.php; then
+  echo FEHLER_WORDPRESS_PFAD: /home/avfrobur/www/gamma.avfroburger.ch/wp-config.php
+  exit 22
+fi
+echo WORDPRESS_OK
+"@
+    Invoke-Checked ssh @('-i', $sshKey, $backendTarget, $backendCheck.Replace("`r`n", "`n"))
+    Invoke-Checked ssh @($wordpressTarget, $wordpressCheck.Replace("`r`n", "`n"))
     Write-Host 'Vorpruefung erfolgreich. Fuer die Auslieferung denselben Befehl mit -Deploy ausfuehren.'
     return
 }
