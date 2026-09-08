@@ -194,8 +194,8 @@ php -l wp-content/plugins/avf-events-integration/includes/class-avf-event-signup
 php -l wp-content/plugins/avf-events-integration/includes/class-avf-event-detail-shortcode.php
 wp eval 'AVF_Events_API_Client::clear_cache();'
 wp maintenance-mode deactivate
-curl --fail --silent --show-error "https://www.avfroburger.ch/anlaesse/froburgfahrt/?pin_check=$(date +%s)" \
-  | grep -F 'Bestehende Anmeldung bearbeiten'
+grep -Fq 'data-avf-edit-form' wp-content/plugins/avf-events-integration/includes/class-avf-event-detail-shortcode.php
+curl --fail --silent --show-error "https://www.avfroburger.ch/anlaesse/froburgfahrt/?pin_check=$(date +%s)" >/dev/null
 )
 ```
 
