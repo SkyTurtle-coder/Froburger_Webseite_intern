@@ -52,6 +52,8 @@ Anmeldeschluss, Admin-Reset und Berechtigungen. Zusätzlich:
 WordPress-PHP-/Browserprüfungen stehen im Plugin unter `tests/signup-pin-check.php`
 und `tests/signup-pin-browser.py`. Die Browserprüfung nutzt echte Formular- und
 Asset-Dateien mit simulierten API-Antworten. Vor dem Live-Einsatz ist ein gemeinsamer
-WordPress-/Django-Test auf der Testumgebung inklusive neuer Anmeldung, Bearbeitung
-und internem Reset erforderlich. Die lokale WordPress-Domain war bei der Umsetzung
+WordPress-/Django-Test auf einer nachweislich isolierten Umgebung inklusive neuer
+Anmeldung, Bearbeitung und internem Reset erforderlich. `test.avfroburger.ch` teilt
+laut Deployment-Runbook die Produktionsdatenbank und darf dafür nicht verwendet
+werden. Die lokale WordPress-Domain war bei der Umsetzung
 nicht erreichbar; es wurden keine Live-Anmeldungen geändert.

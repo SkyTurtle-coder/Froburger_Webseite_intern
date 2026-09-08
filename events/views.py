@@ -184,6 +184,8 @@ class EventUpdateView(RoleAccessMixin, UpdateView):
                             if form.cleaned_data.get("new_pin"):
                                 signup.set_pin(form.cleaned_data["new_pin"])
                             signup.save(actor=self.request.user, source=EventSignup.SOURCE_INTERNAL)
+                except (EventSignup.DoesNotExist, Event.DoesNotExist):
+                    signup_forms[0].add_error(None, "Eine Anmeldung wurde inzwischen gelöscht. Bitte lade die Seite neu.")
                 except (IntegrityError, ValidationError):
                     signup_forms[0].add_error(None, "Die Anmeldungen konnten nicht gespeichert werden.")
                 else:

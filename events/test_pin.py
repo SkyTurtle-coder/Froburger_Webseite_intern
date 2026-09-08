@@ -1,5 +1,7 @@
 import json
 from datetime import timedelta
+from unittest.mock import patch
+from urllib.parse import urlencode
 
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import User
@@ -171,3 +173,39 @@ class SignupPinTests(TestCase):
         self.assertEqual(self.client.post(reverse("event-edit", kwargs={"pk": self.event.pk}), payload).status_code, 302)
         self.assertEqual(self.post(operation="read", vulgo="Newton", pin="01234").status_code, 403)
         self.assertEqual(self.post(operation="read", vulgo="Newton", pin="0000").status_code, 200)
+
+    def test_signed_form_encoded_create_read_update(self):
+        def post_form(payload):
+            self.counter += 1
+            timestamp = str(int(timezone.now().timestamp()) + self.counter)
+            body = urlencode(payload).encode()
+            signature = signing.compute_signature("pin-tests", self.event.slug, timestamp, body)
+            return self.client.post(reverse("api-v1-event-signup", kwargs={"slug": self.event.slug}),
+                                    data=body, content_type="application/x-www-form-urlencoded",
+                                    HTTP_X_AVF_TIMESTAMP=timestamp, HTTP_X_AVF_SIGNATURE=signature)
+        self.assertEqual(post_form({"vulgo": "Form", "pin": "0000", "attending": "1"}).status_code, 201)
+        self.assertEqual(post_form({"vulgo": "Form", "pin": "0000", "operation": "read"}).status_code, 200)
+        response = post_form({"vulgo": "Form", "pin": "0000", "operation": "update",
+                              "attending": "0", f"values[{self.column.key}]": "Neu"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(EventSignup.objects.get(vulgo="Form").attending)
+        self.assertEqual(post_form({"vulgo": "Form", "pin": "0000", "operation": "read", "signup_id": "1"}).status_code, 403)
+
+    def test_admin_concurrent_deletion_has_readable_conflict(self):
+        from .views import EventUpdateView
+
+        self.admin_user()
+        original = EventUpdateView._build_manage_signup_forms
+
+        def build_then_delete(view):
+            forms = original(view)
+            self.signup.delete()
+            return forms
+
+        prefix = f"signup-{self.signup.pk}-"
+        payload = {"action": "manage-signups", prefix + "signup_id": self.signup.pk,
+                   prefix + "vulgo": "Newton", prefix + "attending": "True"}
+        with patch.object(EventUpdateView, "_build_manage_signup_forms", build_then_delete):
+            response = self.client.post(reverse("event-edit", kwargs={"pk": self.event.pk}), payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "inzwischen gelöscht")

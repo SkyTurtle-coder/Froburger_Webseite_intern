@@ -221,16 +221,18 @@ def _parse_request_payload(request):
         return payload if isinstance(payload, dict) else None
 
     values = {}
+    payload = {}
     for key in request.POST:
+        if len(request.POST.getlist(key)) != 1:
+            return None
         if key.startswith("values[") and key.endswith("]"):
             values[key[7:-1]] = request.POST.get(key)
-
-    return {
-        "vulgo": request.POST.get("vulgo"),
-        "attending": request.POST.get("attending"),
-        "website": request.POST.get("website", ""),
-        "values": values,
-    }
+        else:
+            # Keep unknown top-level fields for the same strict validation as JSON.
+            payload[key] = request.POST.get(key)
+    if values or payload.get("operation") != "read":
+        payload["values"] = values
+    return payload
 
 
 def _parse_boolean(value):
