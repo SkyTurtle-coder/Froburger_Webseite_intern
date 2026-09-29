@@ -38,8 +38,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\intern\deploy\Deploy-Forum
 Ohne `-Deploy` wird nur das Paket vorbereitet. Das Skript nimmt ausschliesslich
 committete Forum-Dateien aus dem lokalen Branch `feature/forum` und nennt den
 vollständigen Commit. Lokale Dokument-/Tabellenänderungen bleiben ausserhalb des
-Pakets. Unbekannte Änderungen an gemeinsamen Serverdateien führen vor der
-Installation zum Abbruch, statt sie zu überschreiben.
+Pakets. Die Forum-Ergänzungen werden mit `diff3` in die vorhandenen gemeinsamen
+Serverdateien übernommen. Einstellungen und unabhängige Serveränderungen bleiben
+erhalten. Bei einem Zusammenführungskonflikt stoppt das Skript vor der Installation;
+Dateiinhalte oder Geheimnisse werden dabei nicht ausgegeben.
 
 Ziel: debian@179.237.81.250, /srv/avf-intern/app. Das Skript sichert Code und
 MariaDB-Datenbank avf_intern, installiert die Forum-Migration, sammelt statische

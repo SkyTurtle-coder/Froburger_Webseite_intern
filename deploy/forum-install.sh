@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 release="${1:?Release fehlt}"
 hash="${2:?Paket-Pruefsumme fehlt}"
 baseline_hash="${3:?Baseline-Pruefsumme fehlt}"
@@ -10,21 +11,36 @@ stage=/tmp/$release
 backup=/srv/avf-intern/backups/$release
 shared=(config/settings.py config/urls.py core/context_processors.py templates/base.html templates/partials/navigation_links.html)
 paths=("${shared[@]}" forum templates/forum static/forum static/vendor/pdfjs)
+command -v diff3 > /dev/null || { printf 'diff3 fehlt auf dem Server (Paket diffutils). Nichts installiert.\n' >&2; exit 1; }
 printf '%s  %s\n' "$hash" "$stage/forum.tar.gz" "$baseline_hash" "$stage/baseline.tar.gz" | sha256sum --check --status
-mkdir "$stage/new" "$stage/baseline"
+mkdir "$stage/new" "$stage/baseline" "$stage/current" "$stage/merged"
 tar -xzf "$stage/forum.tar.gz" -C "$stage/new"
 tar -xzf "$stage/baseline.tar.gz" -C "$stage/baseline"
 sudo test -f "$app/manage.py"
 sudo test -f /etc/avf-intern/avf-intern.env
 sudo test ! -e "$backup"
 sudo systemctl is-active --quiet avf-intern
-# Never replace server-specific changes to shared configuration or navigation.
+# Merge only the Forum delta into the actual server version. Never print file
+# contents: settings may contain server-specific credentials.
 for file in "${shared[@]}"; do
-    if ! sudo cmp -s "$app/$file" "$stage/baseline/$file" && ! sudo cmp -s "$app/$file" "$stage/new/$file"; then
-        printf 'Serverdatei weicht ab: %s. Vor dem Deployment abgleichen. Nichts installiert.\n' "$file" >&2
+    mkdir -p "$stage/current/$(dirname "$file")" "$stage/merged/$(dirname "$file")"
+    sudo cat "$app/$file" | sed 's/\r$//' > "$stage/current/$file"
+    if ! diff3 --merge --show-overlap -- "$stage/current/$file" "$stage/baseline/$file" "$stage/new/$file" > "$stage/merged/$file"; then
+        printf 'Zusammenfuehrung nicht eindeutig: %s. Nichts installiert. Serverstand bleibt erhalten.\n' "$file" >&2
         exit 1
     fi
+    printf 'Forum-Ergaenzung vorbereitet: %s (Servereinstellungen erhalten).\n' "$file"
 done
+python3 - "$stage/merged" <<'PY'
+import ast
+import pathlib
+import sys
+for path in pathlib.Path(sys.argv[1]).rglob('*.py'):
+    try:
+        ast.parse(path.read_text(encoding='utf-8'), filename=path.name)
+    except SyntaxError as error:
+        raise SystemExit(f'Syntaxpruefung fehlgeschlagen: {path.name}, Zeile {error.lineno}. Nichts installiert.')
+PY
 django() {
     sudo systemd-run --quiet --wait --pipe --collect \
         --property=User=avfapp --property=Group=avfapp \
@@ -58,7 +74,8 @@ trap rollback ERR
 sudo systemctl stop avf-intern
 sudo sh -c 'umask 077; mariadb-dump --single-transaction avf_intern > "$1"' sh "$backup/database.sql"
 sudo test -s "$backup/database.sql"
-sudo tar -xzf "$stage/forum.tar.gz" -C "$app" "${paths[@]}"
+sudo tar -xzf "$stage/forum.tar.gz" -C "$app" forum templates/forum static/forum static/vendor/pdfjs
+for file in "${shared[@]}"; do sudo cp "$stage/merged/$file" "$app/$file"; done
 for path in "${paths[@]}"; do sudo chown -R avfapp:avfapp "$app/$path"; done
 django check
 django migrate forum --noinput
