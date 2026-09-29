@@ -1960,6 +1960,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         response = self.client.post(
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
+                "email": "profile-member@example.com",
                 "first_name": "Philipp",
                 "last_name": "Thürlemann",
                 "vulgo": "Newton",
@@ -1980,6 +1981,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         response = self.client.post(
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
+                "email": "profile-member@example.com",
                 "first_name": "Philipp",
                 "last_name": "Thürlemann",
                 "vulgo": "Newton",
@@ -2015,6 +2017,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         response = self.client.post(
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
+                "email": "profile-member@example.com",
                 "first_name": "Philipp",
                 "last_name": "Thürlemann",
                 "vulgo": "Newton",
@@ -2035,6 +2038,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         self.client.post(
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
+                "email": "profile-member@example.com",
                 "first_name": "Philipp",
                 "last_name": "Thürlemann",
                 "vulgo": "Newton",
@@ -2069,6 +2073,7 @@ class ProfilePermissionAndMemorialTests(TestCase):
         response = self.client.post(
             reverse("profile-edit", kwargs={"pk": self.member.profile.pk}),
             {
+                "email": "profile-member@example.com",
                 "first_name": "Philipp",
                 "last_name": "Thürlemann",
                 "vulgo": "Newton",

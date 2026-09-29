@@ -18,7 +18,7 @@ class ProfileAdmin(admin.ModelAdmin):
     filter_horizontal = ("roles",)
     readonly_fields = ("membership_status_label", "membership_period_display")
     fieldsets = (
-        ("Profil", {"fields": ("user", "photo", "first_name", "last_name", "vulgo")}),
+        ("Profil", {"fields": ("user", "photo", "first_name", "last_name", "vulgo", "email")}),
         ("Studium und Verbindung", {"fields": ("academic_title", "degree_program", "birth_date")}),
         (
             "Mitgliedschaft",

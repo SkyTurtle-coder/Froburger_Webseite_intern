@@ -2,6 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.utils.crypto import get_random_string
 
 from . import throttling
@@ -56,6 +57,11 @@ class MemberCsvImportForm(forms.Form):
 
 
 class ProfileBaseForm(forms.ModelForm):
+    email = forms.EmailField(
+        label="E-Mail-Adresse",
+        max_length=254,
+        help_text="Diese Adresse wird für die Anmeldung und das Zurücksetzen des Passworts verwendet.",
+    )
     birth_date = forms.DateField(
         label="Geburtsdatum",
         required=False,
@@ -77,6 +83,7 @@ class ProfileBaseForm(forms.ModelForm):
             "first_name",
             "last_name",
             "vulgo",
+            "email",
             "academic_title",
             "degree_program",
             "birth_date",
@@ -89,6 +96,31 @@ class ProfileBaseForm(forms.ModelForm):
         help_texts = {
             "academic_title": "Beispielsweise Dr. med., MSc, BSc oder Prof. Dr.",
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.user_id:
+            self.initial.setdefault("email", self.instance.user.email)
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip().lower()
+        user = self.cleaned_data.get("user")
+        user_id = user.pk if user else self.instance.user_id
+        if User.objects.filter(email__iexact=email).exclude(pk=user_id).exists():
+            raise forms.ValidationError("Für diese E-Mail-Adresse besteht bereits ein Konto.")
+        return email
+
+    @transaction.atomic
+    def save(self, commit=True):
+        return super().save(commit=commit)
+
+    def _save_m2m(self):
+        super()._save_m2m()
+        # Also runs after save(commit=False) in the Django admin. Update only
+        # email to avoid triggering the User signal that saves the profile again.
+        email = self.cleaned_data["email"]
+        User.objects.filter(pk=self.instance.user_id).update(email=email)
+        self.instance.user.email = email
 
     def clean_photo(self):
         return validate_profile_photo(self.cleaned_data.get("photo"))
