@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_version }}">
     <link rel="stylesheet" href="{% static 'css/navigation.css' %}?v={{ static_asset_version }}">
     <script src="{% static 'js/app.js' %}?v={{ static_asset_version }}" defer></script>
+    {% block extra_head %}{% endblock %}
 </head>
 <body>
     {% with current=request.resolver_match.url_name %}

@@ -9,6 +9,7 @@
         <a href="{% url 'memorial-page' %}" class="nav__item nav__item--subtle {% if current == 'memorial-page' %}nav__item--active{% endif %}">Totentafel</a>
         <a href="{% url 'document-hub' %}" class="nav__item nav__item--subtle {% if current == 'document-hub' or current == 'document-scope' %}nav__item--active{% endif %}">Dokumente</a>
         <a href="{% url 'profile-detail' request.user.profile.pk %}" class="nav__item nav__item--subtle {% if current == 'profile-detail' or current == 'profile-edit' or current == 'password_change' or current == 'password_change_done' %}nav__item--active{% endif %}">Profil</a>
+        <a href="{% url 'forum:list' %}" class="nav__item nav__item--subtle {% if request.resolver_match.namespace == 'forum' %}nav__item--active{% endif %}">Forum</a>
         {% if request.user.profile.can_manage_roles %}
         <a href="{% url 'profile-list' %}" class="nav__item nav__item--subtle {% if current == 'profile-list' or current == 'user-create' %}nav__item--active{% endif %}">Administration</a>
         {% endif %}

@@ -1,0 +1,26 @@
+{% extends "forum/base.html" %}
+{% block content %}
+<section class="panel forum-intro">
+    <div class="panel__header">
+        <div><p class="section-kicker">Lesen &amp; Austauschen</p><h2>Unser Forum</h2>
+        <p class="panel__lead">Die Ausgaben unserer Verbindung – und eure Gedanken dazu.</p></div>
+        {% if can_manage %}<a class="button" href="{% url 'forum:create' %}">Ausgabe veröffentlichen</a>{% endif %}
+    </div>
+    <p class="forum-meta">{{ page_obj.paginator.count }} Ausgabe{{ page_obj.paginator.count|pluralize:",n" }} · Neueste zuerst</p>
+</section>
+<div class="forum-issues">
+{% for issue in page_obj %}
+    <article class="panel forum-issue">
+        <span class="forum-badge">FORUM · PDF</span>
+        <p class="forum-meta"><time datetime="{{ issue.created_at|date:'c' }}">{{ issue.created_at|date:"d.m.Y" }}</time></p>
+        <h2><a href="{{ issue.get_absolute_url }}">{{ issue.title }}</a></h2>
+        <p>{{ issue.description|truncatechars:240 }}</p>
+        <div class="forum-issue__footer"><a class="button" href="{{ issue.get_absolute_url }}">Ausgabe lesen</a>
+        <span class="forum-meta">{{ issue.comment_count }} Kommentar{{ issue.comment_count|pluralize:",e" }}</span></div>
+    </article>
+{% empty %}
+    <section class="panel"><h2>Hier entsteht unser Forum.</h2><p>Die erste Ausgabe wird bald veröffentlicht. Danach kannst du hier mitdiskutieren.</p></section>
+{% endfor %}
+</div>
+{% include "forum/pagination.html" %}
+{% endblock %}

@@ -24,7 +24,7 @@ def app_meta(request):
     return {
         "app_name": "AV Froburger Intern",
         "role_labels": ROLE_LABELS,
-        "navigation_section_open": navigation_section_open,
+        "navigation_section_open": navigation_section_open or getattr(getattr(request, "resolver_match", None), "namespace", "") == "forum",
         "public_site_url": get_public_site_url(),
         "static_asset_version": settings.STATIC_ASSET_VERSION,
     }

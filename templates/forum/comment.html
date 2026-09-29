@@ -1,0 +1,28 @@
+<article class="forum-comment" id="comment-{{ comment.pk }}">
+    <header class="forum-comment__header">
+        <span class="forum-avatar" aria-hidden="true">{{ comment.author.profile.vulgo|slice:":1"|upper }}</span>
+        <div><strong>{{ comment.author.profile.vulgo }}</strong>
+            <p class="forum-meta"><a href="{{ comment.get_absolute_url }}"><time datetime="{{ comment.created_at|date:'c' }}">{{ comment.created_at|date:"d.m.Y, H:i" }}</time></a>
+            {% if comment.edited_at %} · Bearbeitet am {{ comment.edited_at|date:"d.m.Y, H:i" }}{% endif %}</p>
+        </div>
+    </header>
+    {% if comment.parent_id %}<p class="forum-meta">Antwort auf <a class="text-link" href="{% url 'forum:comment-link' comment.parent_id %}">{{ comment.parent.author.profile.vulgo }}</a></p>{% endif %}
+    {% if comment.deleted_at %}<p class="forum-meta"><em>Dieser Kommentar wurde gelöscht.</em></p>
+    {% else %}
+        <div class="forum-text">{{ comment.body|linebreaks }}</div>
+        <div class="forum-comment__actions">
+            <form method="post" action="{% url 'forum:comment-like' comment.pk %}">{% csrf_token %}
+                <input type="hidden" name="liked" value="{% if comment.liked %}0{% else %}1{% endif %}">
+                <button type="submit" class="forum-like {% if comment.liked %}is-liked{% endif %}" aria-pressed="{{ comment.liked|yesno:'true,false' }}" aria-label="{% if comment.liked %}Like zurücknehmen{% else %}Kommentar liken{% endif %}"><span aria-hidden="true">♥</span> {{ comment.like_count }} <span>Like{{ comment.like_count|pluralize }}</span></button>
+            </form>
+            {% if request.user.pk == comment.author_id or can_manage %}<a class="text-link" href="{% url 'forum:comment-edit' comment.pk %}">Bearbeiten</a><a class="text-link" href="{% url 'forum:comment-delete' comment.pk %}">Löschen</a>{% endif %}
+        </div>
+        <details class="forum-reply-form"><summary class="text-link">{{ comment.author.profile.vulgo }} antworten</summary>
+            <form method="post" action="{% url 'forum:comment-create' issue.pk %}" class="form-stack">
+                {% csrf_token %}<input type="hidden" name="parent" value="{{ comment.pk }}">
+                <div class="field"><label for="reply-{{ comment.pk }}">Deine Antwort</label><textarea id="reply-{{ comment.pk }}" name="body" rows="3" maxlength="5000" required></textarea></div>
+                <button type="submit" class="button">Antwort veröffentlichen</button>
+            </form>
+        </details>
+    {% endif %}
+</article>

@@ -1,0 +1,11 @@
+{% extends "forum/base.html" %}
+{% block content %}
+<section class="panel"><p class="section-kicker">Forum verwalten</p><h2>{% if issue.pk %}Ausgabe bearbeiten{% else %}Ausgabe veröffentlichen{% endif %}</h2>
+    <form method="post" enctype="multipart/form-data" class="form-stack">
+        {% csrf_token %}{{ form.non_field_errors }}
+        {% for field in form %}{% include "partials/form_field.html" %}{% endfor %}
+        {% if issue.pk %}<a class="text-link" href="{% url 'forum:pdf' issue.pk %}" target="_blank" rel="noopener">Aktuelles PDF öffnen</a>{% endif %}
+        <div class="button-row"><button class="button" type="submit">{% if issue.pk %}Änderungen speichern{% else %}Veröffentlichen{% endif %}</button><a class="button button--ghost" href="{% if issue.pk %}{{ issue.get_absolute_url }}{% else %}{% url 'forum:list' %}{% endif %}">Abbrechen</a></div>
+    </form>
+</section>
+{% endblock %}

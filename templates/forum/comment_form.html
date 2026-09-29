@@ -1,0 +1,12 @@
+{% extends "forum/base.html" %}
+{% block content %}
+<section class="panel"><p class="section-kicker">{{ issue.title }}</p><h2>{% if comment %}Kommentar bearbeiten{% elif parent %}Antwort an {{ parent.author.profile.vulgo }}{% else %}Kommentar verfassen{% endif %}</h2>
+    <form method="post" class="form-stack" action="{% if comment %}{% url 'forum:comment-edit' comment.pk %}{% else %}{% url 'forum:comment-create' issue.pk %}{% endif %}">
+        {% csrf_token %}{{ form.non_field_errors }}
+        {% if parent %}<input type="hidden" name="parent" value="{{ parent.pk }}">{% endif %}
+        {% include "partials/form_field.html" with field=form.body %}
+        {% if comment %}<p class="forum-meta">Änderungen werden am Kommentar als „Bearbeitet“ gekennzeichnet.</p>{% endif %}
+        <div class="button-row"><button class="button" type="submit">{% if comment %}Änderungen speichern{% else %}Veröffentlichen{% endif %}</button><a class="button button--ghost" href="{{ issue.get_absolute_url }}#kommentare">Abbrechen</a></div>
+    </form>
+</section>
+{% endblock %}

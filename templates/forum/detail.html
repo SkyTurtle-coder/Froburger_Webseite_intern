@@ -1,0 +1,52 @@
+{% extends "forum/base.html" %}
+{% load static %}
+{% block forum_head %}<script type="module" src="{% static 'forum/reader.js' %}?v=1"></script>{% endblock %}
+{% block content %}
+<a href="{% url 'forum:list' %}" class="text-link">← Alle Ausgaben</a>
+<article class="panel forum-heading">
+    <p class="section-kicker">Forum · {{ issue.created_at|date:"d.m.Y" }}</p>
+    <h2>{{ issue.title }}</h2>
+    <div class="forum-text">{{ issue.description|linebreaks }}</div>
+    <div class="button-row">
+        <a class="button" href="{% url 'forum:pdf' issue.pk %}?download=1">PDF herunterladen</a>
+        <a class="button button--ghost" href="#kommentare">Zur Diskussion ({{ comment_count }})</a>
+        {% if can_manage %}<a class="text-link" href="{% url 'forum:edit' issue.pk %}">Ausgabe bearbeiten</a><a class="text-link" href="{% url 'forum:delete' issue.pk %}">Ausgabe löschen</a>{% endif %}
+    </div>
+</article>
+<section class="forum-reader" aria-label="PDF lesen" data-pdf-reader
+         data-url="{% url 'forum:pdf' issue.pk %}"
+         data-library="{% static 'vendor/pdfjs/pdf.js' %}"
+         data-worker="{% static 'vendor/pdfjs/pdf.worker.js' %}"
+         data-assets="{% static 'vendor/pdfjs/' %}">
+    <div class="forum-reader__toolbar" hidden>
+        <button type="button" class="button button--ghost" data-prev aria-label="Vorherige PDF-Seite">←</button>
+        <label>Seite <input type="number" value="1" min="1" data-page aria-label="PDF-Seite"></label><span data-pages></span>
+        <button type="button" class="button button--ghost" data-next aria-label="Nächste PDF-Seite">→</button>
+        <label>Ansicht <select data-zoom aria-label="PDF-Zoom"><option value="fit">Seitenbreite</option><option value="1">100 %</option><option value="1.5">150 %</option><option value="2">200 %</option></select></label>
+        <button type="button" class="button button--ghost" data-fullscreen>Vollbild</button>
+    </div>
+    <p class="forum-reader__status" data-status role="status">PDF wird geladen …</p>
+    <div class="forum-reader__viewport" data-viewport tabindex="0" aria-label="PDF-Seite, bei Vergrösserung scrollbar">
+        <div class="forum-reader__page" data-paper><canvas data-canvas role="img" aria-label="PDF-Seite"></canvas><div class="textLayer" data-text></div></div>
+    </div>
+    <p class="forum-reader__fallback"><a class="text-link" href="{% url 'forum:pdf' issue.pk %}" target="_blank" rel="noopener">PDF in einem eigenen Fenster öffnen ↗</a></p>
+    <noscript><p>Zum Lesen in der Seite bitte JavaScript aktivieren oder das PDF über den Link öffnen.</p></noscript>
+</section>
+<section class="panel forum-discussion" id="kommentare">
+    <p class="section-kicker">Im Gespräch</p><h2>{{ comment_count }} Kommentar{{ comment_count|pluralize:",e" }}</h2>
+    <p class="forum-meta">Meiste Likes zuerst, bei Gleichstand neueste zuerst. Antworten bleiben beim zugehörigen Kommentar.</p>
+    <form method="post" action="{% url 'forum:comment-create' issue.pk %}" class="form-stack forum-compose">
+        {% csrf_token %}{% include "partials/form_field.html" with field=form.body %}
+        <div class="button-row"><button class="button" type="submit">Kommentar veröffentlichen</button><span class="forum-meta">Als {{ request.user.profile.vulgo }}</span></div>
+    </form>
+    {% for comment in page_obj %}
+        <div class="forum-thread">
+            {% include "forum/comment.html" %}
+            {% if comment.thread_replies %}<div class="forum-replies">
+                {% for reply in comment.thread_replies %}{% include "forum/comment.html" with comment=reply %}{% endfor %}
+            </div>{% endif %}
+        </div>
+    {% empty %}<p class="forum-empty">Noch keine Kommentare. Teile deine Gedanken zur Ausgabe.</p>{% endfor %}
+    {% include "forum/pagination.html" %}
+</section>
+{% endblock %}

@@ -117,6 +117,7 @@ INSTALLED_APPS = [
     "accounts",
     "events",
     "documents",
+    "forum",
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,8 @@
+{% extends "forum/base.html" %}
+{% block content %}
+<section class="panel"><h2>{% if comment %}Kommentar löschen?{% else %}Ausgabe löschen?{% endif %}</h2>
+    {% if comment %}<div class="forum-text">{{ comment.body|linebreaks }}</div><p>Dein Kommentar wird entfernt. Vorhandene Antworten bleiben sichtbar.</p>
+    {% else %}<p>„{{ issue.title }}“ mit PDF und sämtlichen Kommentaren endgültig löschen?</p>{% endif %}
+    <form method="post" class="button-row">{% csrf_token %}<button type="submit" class="button">Endgültig löschen</button><a class="button button--ghost" href="{{ issue.get_absolute_url }}">Abbrechen</a></form>
+</section>
+{% endblock %}

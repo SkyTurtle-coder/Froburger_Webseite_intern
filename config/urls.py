@@ -118,6 +118,7 @@ urlpatterns = [
     path("accounts/", include("accounts.urls")),
     path("anlaesse/", include("events.urls")),
     path("dokumente/", include("documents.urls")),
+    path("forum/", include("forum.urls")),
     path("", DashboardView.as_view(), name="dashboard"),
 ]
 

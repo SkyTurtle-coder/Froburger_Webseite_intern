@@ -1,0 +1,7 @@
+{% if page_obj.has_other_pages %}
+<nav class="button-row forum-pagination" aria-label="Seiten">
+    {% if page_obj.has_previous %}<a class="button button--ghost" href="?page={{ page_obj.previous_page_number }}{% if issue %}#kommentare{% endif %}">Zurück</a>{% endif %}
+    <span>Seite {{ page_obj.number }} von {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a class="button button--ghost" href="?page={{ page_obj.next_page_number }}{% if issue %}#kommentare{% endif %}">Weiter</a>{% endif %}
+</nav>
+{% endif %}
