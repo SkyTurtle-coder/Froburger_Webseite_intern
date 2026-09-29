@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from enable_forum import enable_forum
+import ast
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -60,6 +62,30 @@ class ForumMergeTests(unittest.TestCase):
         result = self.merge("setting = 'server'\n", "setting = 'before'\n", "setting = 'new'\n")
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"<<<<<<<", result.stdout)
+
+
+class ForumSettingsTests(unittest.TestCase):
+    def test_preserves_custom_settings_comments_and_app_order(self):
+        source = '# Eigene Konfiguration\nSECRET_KEY = "test-only"\nINSTALLED_APPS = [\n    "custom.app", # behalten\n    "accounts",\n]\nEMAIL_HOST = "mail.example.test"\n'
+        expected = source.replace('INSTALLED_APPS = [', 'INSTALLED_APPS = [\n    "forum",')
+        self.assertEqual(enable_forum(source), expected)
+        self.assertEqual(enable_forum(expected), expected)
+
+    def test_single_line_lists_tuples_empty_lists_and_unicode_offsets(self):
+        for literal in ('[]', '()', '["accounts"]', '("accounts",)', '["accounts", ]'):
+            source = f'"Grüezi"; INSTALLED_APPS = {literal}\n'
+            result = enable_forum(source)
+            value = ast.parse(result).body[1].value
+            self.assertEqual(list(ast.literal_eval(value)), ["forum", *ast.literal_eval(literal)])
+
+    def test_existing_app_config_is_not_duplicated(self):
+        source = 'INSTALLED_APPS = ["accounts", "forum.apps.ForumConfig"]\n'
+        self.assertEqual(enable_forum(source), source)
+
+    def test_dynamic_or_repeated_assignment_stops(self):
+        for source in ('INSTALLED_APPS = get_apps()', 'INSTALLED_APPS = []\nINSTALLED_APPS += ["accounts"]', 'if True:\n    INSTALLED_APPS = []'):
+            with self.assertRaises(ValueError):
+                enable_forum(source)
 
 
 if __name__ == "__main__":

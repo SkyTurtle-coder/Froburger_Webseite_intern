@@ -22,6 +22,9 @@ Invoke-Checked git (@('-C', $root, 'archive', '--format=tar.gz', "--output=$befo
 $script = Join-Path $package 'install.sh'
 $source = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'forum-install.sh')).Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($script, $source, (New-Object System.Text.UTF8Encoding($false)))
+$settingsHelper = Join-Path $package 'enable_forum.py'
+$helperSource = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'enable_forum.py')).Replace("`r`n", "`n")
+[System.IO.File]::WriteAllText($settingsHelper, $helperSource, (New-Object System.Text.UTF8Encoding($false)))
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 $beforeHash = (Get-FileHash -LiteralPath $before -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "Forum-Paket aus Commit ${commit}: $archive"
@@ -33,6 +36,6 @@ $key = Join-Path $env:USERPROFILE '.ssh/id_ed25519'
 if (-not (Test-Path -LiteralPath $key -PathType Leaf)) { throw "SSH-Schluessel fehlt: $key" }
 $target = 'debian@179.237.81.250'
 Invoke-Checked ssh @('-i', $key, $target, "umask 077; mkdir /tmp/$release")
-Invoke-Checked scp @('-i', $key, $archive, $before, $script, "${target}:/tmp/$release/")
+Invoke-Checked scp @('-i', $key, $archive, $before, $script, $settingsHelper, "${target}:/tmp/$release/")
 Invoke-Checked ssh @('-t', '-i', $key, $target, "bash /tmp/$release/install.sh $release $hash $beforeHash")
 Write-Host "Forum-Deployment $release erfolgreich."

@@ -38,7 +38,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\intern\deploy\Deploy-Forum
 Ohne `-Deploy` wird nur das Paket vorbereitet. Das Skript nimmt ausschliesslich
 committete Forum-Dateien aus dem lokalen Branch `feature/forum` und nennt den
 vollständigen Commit. Lokale Dokument-/Tabellenänderungen bleiben ausserhalb des
-Pakets. Die Forum-Ergänzungen werden mit `diff3` in die vorhandenen gemeinsamen
+Pakets. In settings.py wird ausschliesslich der Forum-Eintrag zur vorhandenen
+INSTALLED_APPS-Liste ergänzt; die Datei wird dabei nicht ausgeführt. Die übrigen
+Forum-Ergänzungen werden mit `diff3` in die vorhandenen gemeinsamen
 Serverdateien übernommen. Einstellungen und unabhängige Serveränderungen bleiben
 erhalten. Bei einem Zusammenführungskonflikt stoppt das Skript vor der Installation;
 Dateiinhalte oder Geheimnisse werden dabei nicht ausgegeben.

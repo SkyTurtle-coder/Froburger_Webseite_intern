@@ -22,15 +22,23 @@ sudo test ! -e "$backup"
 sudo systemctl is-active --quiet avf-intern
 # Merge only the Forum delta into the actual server version. Never print file
 # contents: settings may contain server-specific credentials.
+conflicts=0
 for file in "${shared[@]}"; do
     mkdir -p "$stage/current/$(dirname "$file")" "$stage/merged/$(dirname "$file")"
     sudo cat "$app/$file" | sed 's/\r$//' > "$stage/current/$file"
-    if ! diff3 --merge --show-overlap -- "$stage/current/$file" "$stage/baseline/$file" "$stage/new/$file" > "$stage/merged/$file"; then
+    if [[ "$file" == config/settings.py ]]; then
+        if ! python3 "$stage/enable_forum.py" "$stage/current/$file" "$stage/merged/$file"; then
+            conflicts=1
+            continue
+        fi
+    elif ! diff3 --merge --show-overlap -- "$stage/current/$file" "$stage/baseline/$file" "$stage/new/$file" > "$stage/merged/$file"; then
         printf 'Zusammenfuehrung nicht eindeutig: %s. Nichts installiert. Serverstand bleibt erhalten.\n' "$file" >&2
-        exit 1
+        conflicts=1
+        continue
     fi
     printf 'Forum-Ergaenzung vorbereitet: %s (Servereinstellungen erhalten).\n' "$file"
 done
+test "$conflicts" = 0
 python3 - "$stage/merged" <<'PY'
 import ast
 import pathlib
