@@ -20,7 +20,7 @@
                         {% endif %}
                         <div class="tag-row public-hero__tags">
                             <span class="tag tag--inverted">{{ event.get_status_display }}</span>
-                            <span class="tag tag--inverted">{{ event.start|date:"d.m.Y H:i" }} bis {{ event.end|date:"d.m.Y H:i" }}</span>
+                            <span class="tag tag--inverted">{{ event.start|date:"d.m.Y H:i" }}{% if event.start_timing %} {{ event.get_start_timing_display }}{% endif %} bis {{ event.end|date:"d.m.Y H:i" }}</span>
                             <span class="tag tag--inverted">{{ event.location }}</span>
                         </div>
                     </div>
@@ -31,7 +31,7 @@
                         </div>
                         <div class="public-summary-card">
                             <span class="public-summary-card__label">Beginn</span>
-                            <strong>{{ event.start|date:"H:i" }}</strong>
+                            <strong>{{ event.start|date:"H:i" }}{% if event.start_timing %} {{ event.get_start_timing_display }}{% endif %}</strong>
                         </div>
                         <div class="public-summary-card">
                             <span class="public-summary-card__label">Ort</span>

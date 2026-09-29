@@ -121,7 +121,7 @@
                     {% for event in next_events %}
                     <tr>
                         <td>{{ event.title }}</td>
-                        <td>{{ event.start|date:"d.m.Y H:i" }}</td>
+                        <td>{{ event.start|date:"d.m.Y H:i" }}{% if event.start_timing %} {{ event.get_start_timing_display }}{% endif %}</td>
                         <td>{{ event.location|default:"-" }}</td>
                         <td>{% if event.is_public %}Öffentlich{% else %}Intern{% endif %}</td>
                     </tr>

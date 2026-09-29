@@ -12,6 +12,11 @@ from django.utils import timezone
 
 
 class Event(models.Model):
+    class StartTiming(models.TextChoices):
+        UNSPECIFIED = "", "Ohne Zusatz"
+        ST = "st", "s.t."
+        CT = "ct", "c.t."
+
     STATUS_CHOICES = [
         ("INTERN", "Intern"),
         ("OFF", "Off"),
@@ -25,6 +30,7 @@ class Event(models.Model):
     short_description = models.CharField(max_length=280, blank=True)
     description = models.TextField(blank=True)
     start = models.DateTimeField()
+    start_timing = models.CharField("Zeitangabe", max_length=2, choices=StartTiming.choices, blank=True, default="")
     end = models.DateTimeField()
     location = models.CharField(max_length=200, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES)

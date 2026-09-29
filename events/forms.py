@@ -29,6 +29,7 @@ class EventForm(forms.ModelForm):
             "short_description",
             "description",
             "start",
+            "start_timing",
             "end",
             "signup_deadline_at",
             "location",

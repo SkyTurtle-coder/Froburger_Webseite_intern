@@ -45,6 +45,7 @@ def _event_to_payload(event):
         "status": event.status,
         "status_label": event.get_status_display(),
         "start_at": start_at.isoformat(),
+        "start_timing": event.start_timing,
         "end_at": end_at.isoformat(),
         "timezone_name": event.timezone_name,
         "location_name": event.location,
