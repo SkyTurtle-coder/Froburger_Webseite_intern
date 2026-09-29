@@ -17,8 +17,10 @@ $shared = @('config/settings.py', 'config/urls.py', 'core/context_processors.py'
 $files = $shared + @('forum', 'templates/forum', 'static/forum', 'static/vendor/pdfjs')
 $archive = Join-Path $package 'forum.tar.gz'
 $before = Join-Path $package 'baseline.tar.gz'
-Invoke-Checked git (@('-C', $root, 'archive', '--format=tar.gz', "--output=$archive", $commit, '--') + $files)
-Invoke-Checked git (@('-C', $root, 'archive', '--format=tar.gz', "--output=$before", $baseline, '--') + $shared)
+# Git archive applies core.autocrlf to exported text on Windows. Linux merge
+# inputs must all use LF, regardless of the developer's checkout settings.
+Invoke-Checked git (@('-C', $root, '-c', 'core.autocrlf=false', 'archive', '--format=tar.gz', "--output=$archive", $commit, '--') + $files)
+Invoke-Checked git (@('-C', $root, '-c', 'core.autocrlf=false', 'archive', '--format=tar.gz', "--output=$before", $baseline, '--') + $shared)
 $script = Join-Path $package 'install.sh'
 $source = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'forum-install.sh')).Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($script, $source, (New-Object System.Text.UTF8Encoding($false)))

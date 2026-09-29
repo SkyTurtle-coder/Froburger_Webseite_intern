@@ -25,6 +25,9 @@ sudo systemctl is-active --quiet avf-intern
 conflicts=0
 for file in "${shared[@]}"; do
     mkdir -p "$stage/current/$(dirname "$file")" "$stage/merged/$(dirname "$file")"
+    # Older Windows-built packages may contain CRLF. Normalize all three
+    # merge inputs, not just the current server file.
+    sed -i 's/\r$//' "$stage/baseline/$file" "$stage/new/$file"
     sudo cat "$app/$file" | sed 's/\r$//' > "$stage/current/$file"
     if [[ "$file" == config/settings.py ]]; then
         if ! python3 "$stage/enable_forum.py" "$stage/current/$file" "$stage/merged/$file"; then

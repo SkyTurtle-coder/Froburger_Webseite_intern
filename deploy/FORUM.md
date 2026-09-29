@@ -44,6 +44,9 @@ Forum-Ergänzungen werden mit `diff3` in die vorhandenen gemeinsamen
 Serverdateien übernommen. Einstellungen und unabhängige Serveränderungen bleiben
 erhalten. Bei einem Zusammenführungskonflikt stoppt das Skript vor der Installation;
 Dateiinhalte oder Geheimnisse werden dabei nicht ausgegeben.
+Archive werden ausdrücklich mit `core.autocrlf=false` erstellt. Vor dem
+Vergleich normalisiert der Installer alle drei Textversionen auf LF, damit
+Windows-Zeilenenden keine scheinbaren Zusammenführungskonflikte erzeugen.
 
 Ziel: debian@179.237.81.250, /srv/avf-intern/app. Das Skript sichert Code und
 MariaDB-Datenbank avf_intern, installiert die Forum-Migration, sammelt statische

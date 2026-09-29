@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from enable_forum import enable_forum
 import ast
+import io
+import tarfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,6 +20,28 @@ SHARED = (
 
 
 class ForumMergeTests(unittest.TestCase):
+    def test_windows_git_archives_merge_with_linux_server_files(self):
+        archives = []
+        for revision in ("337c194", "feature/forum"):
+            data = subprocess.check_output([
+                "git", "-c", "core.autocrlf=true", "archive", "--format=tar", revision, "--", *SHARED
+            ], cwd=ROOT)
+            with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+                archives.append({name: archive.extractfile(name).read() for name in SHARED})
+        bash = shutil.which("bash") if os.name != "nt" else "C:/Program Files/Git/bin/bash.exe"
+        for name in SHARED:
+            with self.subTest(file=name), tempfile.TemporaryDirectory() as directory:
+                baseline, new = archives[0][name], archives[1][name]
+                self.assertIn(b"\r\n", baseline)
+                self.assertIn(b"\r\n", new)
+                Path(directory, "current").write_bytes(baseline.replace(b"\r\n", b"\n"))
+                Path(directory, "baseline").write_bytes(baseline)
+                Path(directory, "new").write_bytes(new)
+                # Exact normalization and merge used by the Linux installer.
+                result = subprocess.run([bash, "-c", "set -eu\nsed -i 's/\\r$//' baseline new\ndiff3 --merge --show-overlap -- current baseline new"], cwd=directory, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                self.assertEqual(result.stdout, new.replace(b"\r\n", b"\n"))
+
     def merge(self, current, baseline, new):
         with tempfile.TemporaryDirectory() as directory:
             paths = [Path(directory, name) for name in ("current", "baseline", "new")]
