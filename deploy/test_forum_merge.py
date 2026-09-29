@@ -112,5 +112,17 @@ class ForumSettingsTests(unittest.TestCase):
                 enable_forum(source)
 
 
+class ForumInstallerFailureTests(unittest.TestCase):
+    def test_error_trap_is_inherited_by_django_helper(self):
+        bash = shutil.which("bash") if os.name != "nt" else "C:/Program Files/Git/bin/bash.exe"
+        for name in ("forum-install.sh", "forum-repair.sh"):
+            with self.subTest(script=name):
+                options = (ROOT / "deploy" / name).read_text().splitlines()[1]
+                script = options + "\nrollback() { result=$?; trap - ERR; printf 'rollback'; exit $result; }\ntrap rollback ERR\ndjango() { bash -c 'exit 42'; printf 'unreachable'; }\ndjango\nprintf 'unreachable'\n"
+                result = subprocess.run([bash, "-c", script], capture_output=True)
+                self.assertEqual(result.returncode, 42)
+                self.assertEqual(result.stdout, b"rollback")
+
+
 if __name__ == "__main__":
     unittest.main()

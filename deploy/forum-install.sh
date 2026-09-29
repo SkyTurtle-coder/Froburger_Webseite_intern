@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 release="${1:?Release fehlt}"
 hash="${2:?Paket-Pruefsumme fehlt}"
@@ -86,6 +86,8 @@ sudo systemctl stop avf-intern
 sudo sh -c 'umask 077; mariadb-dump --single-transaction avf_intern > "$1"' sh "$backup/database.sql"
 sudo test -s "$backup/database.sql"
 sudo tar -xzf "$stage/forum.tar.gz" -C "$app" forum templates/forum static/forum static/vendor/pdfjs
+# tar can create this implicit parent as root:0700 under our private umask.
+sudo install -d -m 755 -o avfapp -g avfapp "$app/static/vendor"
 for file in "${shared[@]}"; do sudo cp "$stage/merged/$file" "$app/$file"; done
 for path in "${paths[@]}"; do sudo chown -R avfapp:avfapp "$app/$path"; done
 django check
