@@ -1,26 +1,29 @@
 {% extends "forum/base.html" %}
 {% block content %}
-<section class="panel forum-intro">
-    <div class="panel__header">
-        <div><p class="section-kicker">Lesen &amp; Austauschen</p><h2>Unser Forum</h2>
-        <p class="panel__lead">Die Ausgaben unserer Verbindung – und eure Gedanken dazu.</p></div>
+<div class="forum-index">
+    <header class="forum-list-header">
+        <div><p class="forum-list-lead">Die Ausgaben unserer Verbindung</p>
+        <p class="forum-meta">{{ page_obj.paginator.count }} Ausgabe{{ page_obj.paginator.count|pluralize:",n" }} · Nach Veröffentlichungsdatum, neueste zuerst</p></div>
         {% if can_manage %}<a class="button" href="{% url 'forum:create' %}">Ausgabe veröffentlichen</a>{% endif %}
-    </div>
-    <p class="forum-meta">{{ page_obj.paginator.count }} Ausgabe{{ page_obj.paginator.count|pluralize:",n" }} · Neueste zuerst</p>
-</section>
-<div class="forum-issues">
-{% for issue in page_obj %}
-    <article class="panel forum-issue">
-        <span class="forum-badge">FORUM · PDF</span>
-        <p class="forum-meta"><time datetime="{{ issue.created_at|date:'c' }}">{{ issue.created_at|date:"d.m.Y" }}</time></p>
-        <h2><a href="{{ issue.get_absolute_url }}">{{ issue.title }}</a></h2>
-        <p>{{ issue.description|truncatechars:240 }}</p>
-        <div class="forum-issue__footer"><a class="button" href="{{ issue.get_absolute_url }}">Ausgabe lesen</a>
-        <span class="forum-meta">{{ issue.comment_count }} Kommentar{{ issue.comment_count|pluralize:",e" }}</span></div>
-    </article>
-{% empty %}
-    <section class="panel"><h2>Hier entsteht unser Forum.</h2><p>Die erste Ausgabe wird bald veröffentlicht. Danach kannst du hier mitdiskutieren.</p></section>
-{% endfor %}
+    </header>
+    <ol class="forum-list" aria-label="Forum-Ausgaben nach Veröffentlichungsdatum">
+    {% for issue in page_obj %}
+        <li class="forum-list-row">
+            <div class="forum-list-date"><span class="forum-list-label">Veröffentlicht</span><time datetime="{{ issue.publication_date|date:'Y-m-d' }}">{{ issue.publication_date|date:"d.m.Y" }}</time></div>
+            <div class="forum-list-content">
+                <h2><a href="{{ issue.get_absolute_url }}">{{ issue.title }}</a></h2>
+                <p>{{ issue.description|truncatechars:180 }}</p>
+                <span class="forum-meta">PDF · {{ issue.comment_count }} Kommentar{{ issue.comment_count|pluralize:",e" }}</span>
+            </div>
+            <div class="forum-list-actions">
+                <a class="button button--ghost" href="{{ issue.get_absolute_url }}">Ausgabe lesen</a>
+                {% if can_manage %}<a class="text-link" href="{% url 'forum:edit' issue.pk %}">Bearbeiten</a>{% endif %}
+            </div>
+        </li>
+    {% empty %}
+        <li class="forum-list-empty">Noch keine Ausgaben veröffentlicht.</li>
+    {% endfor %}
+    </ol>
+    {% include "forum/pagination.html" %}
 </div>
-{% include "forum/pagination.html" %}
 {% endblock %}

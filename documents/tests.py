@@ -1,17 +1,22 @@
+import json
 import tempfile
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.storage import default_storage
 from django.db import connection
 from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext, override_settings
 from django.urls import reverse
+from openpyxl import Workbook, load_workbook
 
 from accounts.models import Role
 
-from .models import Document, DocumentFolder, FolderScope
+from .models import Document, DocumentFolder, FolderScope, SpreadsheetRevision
 from .policies import can_delete_document, can_download_document, can_edit_document, can_view_document
 
 
@@ -504,6 +509,210 @@ class DocumentManagementTests(TestCase):
         second = self.client.post(reverse("document-delete", kwargs={"pk": self.root_document.pk}))
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 404)
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class SpreadsheetEditorTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="spreadsheet-editor", password="testpass123")
+        cls.other_user = User.objects.create_user(username="spreadsheet-reader", password="testpass123")
+
+    def setUp(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Mitglieder"
+        sheet["A1"] = "Name"
+        sheet["B1"] = "Jahrgang"
+        sheet["A2"] = "Max Muster"
+        stream = BytesIO()
+        workbook.save(stream)
+        self.document = Document.objects.create(
+            title="Mitgliederliste",
+            visibility=FolderScope.GENERAL,
+            file=SimpleUploadedFile(
+                "mitglieder.xlsx",
+                stream.getvalue(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            uploaded_by=self.user,
+        )
+        self.client.login(username="spreadsheet-editor", password="testpass123")
+
+    def _cells(self, value="Max Muster"):
+        cells = [["" for _column in range(10)] for _row in range(20)]
+        cells[0][0] = "Name"
+        cells[0][1] = "Jahrgang"
+        cells[1][0] = value
+        return cells
+
+    def test_owner_can_open_and_save_xlsx_in_browser(self):
+        edit_url = reverse("document-spreadsheet-edit", kwargs={"pk": self.document.pk})
+        response = self.client.get(edit_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Max Muster")
+        self.assertContains(response, "Zeile hinzufügen")
+
+        response = self.client.post(
+            edit_url,
+            {"sheet": "Mitglieder", "revision": 0, "cells": json.dumps(self._cells("Anna Beispiel"))},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.spreadsheet_revision, 1)
+        self.assertEqual(SpreadsheetRevision.objects.filter(document=self.document).count(), 1)
+        with self.document.file.open("rb") as file_handle:
+            saved = load_workbook(file_handle)
+        self.assertEqual(saved["Mitglieder"]["A2"].value, "Anna Beispiel")
+
+    def test_stale_revision_does_not_overwrite_newer_file(self):
+        edit_url = reverse("document-spreadsheet-edit", kwargs={"pk": self.document.pk})
+        self.client.post(edit_url, {"sheet": "Mitglieder", "revision": 0, "cells": json.dumps(self._cells("Neu"))})
+        response = self.client.post(
+            edit_url,
+            {"sheet": "Mitglieder", "revision": 0, "cells": json.dumps(self._cells("Veraltet"))},
+            follow=True,
+        )
+        self.assertContains(response, "inzwischen geändert")
+        self.document.refresh_from_db()
+        with self.document.file.open("rb") as file_handle:
+            saved = load_workbook(file_handle)
+        self.assertEqual(saved["Mitglieder"]["A2"].value, "Neu")
+
+    def test_non_owner_cannot_open_spreadsheet_editor(self):
+        self.client.logout()
+        self.client.login(username="spreadsheet-reader", password="testpass123")
+        response = self.client.get(reverse("document-spreadsheet-edit", kwargs={"pk": self.document.pk}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_untouched_numeric_and_date_cells_keep_their_type(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Daten"
+        sheet["A1"] = "Jahrgang"
+        sheet["A2"] = 2001
+        sheet["B1"] = "Beitritt"
+        sheet["B2"] = datetime(2020, 3, 4)
+        sheet["C1"] = "Aktiv"
+        sheet["C2"] = True
+        stream = BytesIO()
+        workbook.save(stream)
+        document = Document.objects.create(
+            title="Typen",
+            visibility=FolderScope.GENERAL,
+            file=SimpleUploadedFile(
+                "typen.xlsx",
+                stream.getvalue(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            uploaded_by=self.user,
+        )
+        edit_url = reverse("document-spreadsheet-edit", kwargs={"pk": document.pk})
+
+        cells = [["" for _column in range(10)] for _row in range(20)]
+        cells[0][0] = "Jahrgang"
+        cells[0][1] = "Beitritt"
+        cells[0][2] = "Aktiv"
+        cells[1][0] = "2001"
+        cells[1][1] = "2020-03-04 00:00:00"
+        cells[1][2] = "True"
+        cells[1][3] = "2002"  # a genuinely new value in a previously empty cell
+
+        response = self.client.post(
+            edit_url,
+            {"sheet": "Daten", "revision": 0, "cells": json.dumps(cells)},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        document.refresh_from_db()
+        with document.file.open("rb") as file_handle:
+            saved = load_workbook(file_handle)
+        sheet = saved["Daten"]
+        self.assertEqual(sheet["A2"].value, 2001)
+        self.assertIsInstance(sheet["A2"].value, int)
+        self.assertEqual(sheet["B2"].value, datetime(2020, 3, 4))
+        self.assertIs(sheet["C2"].value, True)
+        self.assertEqual(sheet["D2"].value, 2002)
+        self.assertIsInstance(sheet["D2"].value, int)
+
+    def test_previous_working_file_is_removed_after_save(self):
+        edit_url = reverse("document-spreadsheet-edit", kwargs={"pk": self.document.pk})
+        original_path = self.document.file.path
+        self.assertTrue(Path(original_path).exists())
+
+        self.client.post(edit_url, {"sheet": "Mitglieder", "revision": 0, "cells": json.dumps(self._cells("Erste"))})
+        self.document.refresh_from_db()
+        first_path = self.document.file.path
+        self.assertFalse(Path(original_path).exists())
+
+        self.client.post(
+            edit_url,
+            {"sheet": "Mitglieder", "revision": 1, "cells": json.dumps(self._cells("Zweite"))},
+        )
+        self.document.refresh_from_db()
+        self.assertFalse(Path(first_path).exists())
+        self.assertTrue(Path(self.document.file.path).exists())
+        self.assertEqual(SpreadsheetRevision.objects.filter(document=self.document).count(), 2)
+
+    def test_bold_cell_formatting_is_saved_to_excel(self):
+        edit_url = reverse("document-spreadsheet-edit", kwargs={"pk": self.document.pk})
+        response = self.client.post(
+            edit_url,
+            {
+                "sheet": "Mitglieder",
+                "revision": 0,
+                "cells": json.dumps(self._cells()),
+                "formats": json.dumps([{"row": 1, "column": 1, "bold": True}]),
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.document.refresh_from_db()
+        with self.document.file.open("rb") as file_handle:
+            saved = load_workbook(file_handle)
+        self.assertTrue(saved["Mitglieder"]["A1"].font.bold)
+
+    def test_only_five_spreadsheet_revisions_are_retained(self):
+        edit_url = reverse("document-spreadsheet-edit", kwargs={"pk": self.document.pk})
+        first_revision_file = ""
+        for revision in range(6):
+            response = self.client.post(
+                edit_url,
+                {"sheet": "Mitglieder", "revision": revision, "cells": json.dumps(self._cells(f"Version {revision}"))},
+            )
+            self.assertEqual(response.status_code, 302)
+            if revision == 0:
+                first_revision_file = SpreadsheetRevision.objects.get(document=self.document, revision=1).file.name
+
+        revisions = SpreadsheetRevision.objects.filter(document=self.document).order_by("revision")
+        self.assertEqual(revisions.count(), 5)
+        self.assertEqual(list(revisions.values_list("revision", flat=True)), [2, 3, 4, 5, 6])
+        self.assertFalse(default_storage.exists(first_revision_file))
+
+    def test_spreadsheet_file_paths_allow_versioned_long_file_names(self):
+        self.assertEqual(Document._meta.get_field("file").max_length, 255)
+        self.assertEqual(SpreadsheetRevision._meta.get_field("file").max_length, 255)
+
+    def test_document_file_name_hides_repeated_storage_and_version_prefixes(self):
+        document = Document(
+            pk=57,
+            title="Bestellungen",
+            visibility=FolderScope.GENERAL,
+            file="protected/spreadsheets/document-57-document-57-document-57-Bestellungen-Version-5.xlsx",
+            uploaded_by=self.user,
+        )
+        self.assertEqual(document.file_name, "Bestellungen.xlsx")
+
+    def test_document_title_is_used_for_storage_suffix_free_file_name(self):
+        document = Document(
+            pk=57,
+            title="Bestellungen",
+            visibility=FolderScope.GENERAL,
+            file="protected/spreadsheets/document-57-Bestellungen_LmXM61a_00e4q3H.xlsx",
+            uploaded_by=self.user,
+        )
+        self.assertEqual(document.file_name, "Bestellungen.xlsx")
 
 
 @override_settings(MEDIA_ROOT=tempfile.gettempdir())

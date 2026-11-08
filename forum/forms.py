@@ -6,12 +6,16 @@ from .models import Comment, Issue
 class IssueForm(forms.ModelForm):
     class Meta:
         model = Issue
-        fields = ("title", "description", "pdf")
+        fields = ("title", "publication_date", "description", "pdf")
         widgets = {
+            "publication_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "description": forms.Textarea(attrs={"rows": 4}),
             "pdf": forms.FileInput(attrs={"accept": "application/pdf,.pdf"}),
         }
-        help_texts = {"pdf": "Eine PDF-Datei, maximal 20 MB. Beim Bearbeiten leer lassen, um die aktuelle Ausgabe zu behalten."}
+        help_texts = {
+            "publication_date": "Ursprüngliches Veröffentlichungsdatum der Ausgabe. Ältere Ausgaben werden damit richtig einsortiert. Nach dem Hochladen ist die Ausgabe sofort sichtbar.",
+            "pdf": "Eine PDF-Datei, maximal 20 MB. Beim Bearbeiten leer lassen, um die aktuelle Ausgabe zu behalten.",
+        }
 
     def clean_pdf(self):
         upload = self.cleaned_data["pdf"]

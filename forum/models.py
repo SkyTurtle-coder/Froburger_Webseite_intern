@@ -3,6 +3,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 from django.urls import reverse
+from django.utils import timezone
 
 
 def issue_pdf_path(instance, filename):
@@ -15,10 +16,11 @@ class Issue(models.Model):
     pdf = models.FileField("PDF-Ausgabe", upload_to=issue_pdf_path, max_length=255)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="forum_issues")
     created_at = models.DateTimeField(auto_now_add=True)
+    publication_date = models.DateField("Veröffentlichungsdatum", default=timezone.localdate, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-created_at", "-pk"]
+        ordering = ["-publication_date", "-pk"]
         verbose_name = "Forum-Ausgabe"
         verbose_name_plural = "Forum-Ausgaben"
 
@@ -27,6 +29,7 @@ class Issue(models.Model):
 
     def get_absolute_url(self):
         return reverse("forum:detail", args=[self.pk])
+
 
 
 class Comment(models.Model):

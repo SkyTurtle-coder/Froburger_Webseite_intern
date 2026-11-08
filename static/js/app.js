@@ -34,6 +34,138 @@
 })();
 
 (() => {
+    const editor = document.querySelector("[data-spreadsheet-editor]");
+
+    if (!editor) {
+        return;
+    }
+
+    const form = editor.querySelector("[data-spreadsheet-form]");
+    const grid = editor.querySelector("[data-spreadsheet-grid]");
+    const payload = editor.querySelector("[data-spreadsheet-payload]");
+    const formatsPayload = editor.querySelector("[data-spreadsheet-formats]");
+    const addRowButton = editor.querySelector("[data-spreadsheet-add-row]");
+    const boldButton = editor.querySelector("[data-spreadsheet-bold]");
+    const selectionLabel = editor.querySelector("[data-spreadsheet-selection]");
+    let selectedInput = null;
+
+    function rowsToPayload() {
+        return Array.from(grid.tBodies[0].rows).map((row) =>
+            Array.from(row.querySelectorAll("input")).map((input) => input.value)
+        );
+    }
+
+    function formatsToPayload() {
+        const formats = [];
+        Array.from(grid.tBodies[0].rows).forEach((row, rowIndex) => {
+            Array.from(row.querySelectorAll("input")).forEach((input, columnIndex) => {
+                if (input.dataset.formatTouched !== "true") {
+                    return;
+                }
+                formats.push({
+                    row: rowIndex + 1,
+                    column: columnIndex + 1,
+                    bold: input.dataset.bold === "true",
+                });
+            });
+        });
+        return formats;
+    }
+
+    function updateToolbar(input) {
+        selectedInput = input;
+        const isBold = input.dataset.bold === "true";
+        boldButton.setAttribute("aria-pressed", isBold ? "true" : "false");
+        selectionLabel.textContent = input.getAttribute("aria-label") || "Zelle ausgewählt";
+    }
+
+    function applyFormat(input) {
+        input.dataset.formatTouched = "true";
+        input.style.setProperty("--spreadsheet-font-weight", input.dataset.bold === "true" ? "700" : "400");
+        input.style.setProperty("--spreadsheet-font-size", `${input.dataset.fontSize || 11}pt`);
+        updateToolbar(input);
+        fitColumns();
+    }
+
+    function longestWordLength(value) {
+        return value
+            .trim()
+            .split(/\s+/)
+            .reduce((longest, word) => Math.max(longest, word.length), 0);
+    }
+
+    function fitColumns() {
+        const rows = Array.from(grid.tBodies[0].rows);
+        const columnCount = grid.tHead.rows[0].cells.length - 1;
+        for (let column = 0; column < columnCount; column += 1) {
+            let longestWord = 0;
+            let largestFontSize = 11;
+            rows.forEach((row) => {
+                const input = row.querySelectorAll("input")[column];
+                longestWord = Math.max(longestWord, longestWordLength(input.value));
+                largestFontSize = Math.max(largestFontSize, Number(input.dataset.fontSize || 11));
+            });
+            const width = Math.max(7, Math.ceil(longestWord * (largestFontSize / 11)) + 2);
+            grid.querySelectorAll(`tr > :nth-child(${column + 2})`).forEach((cell) => {
+                cell.style.width = `${width}ch`;
+            });
+        }
+    }
+
+    grid.addEventListener("focusin", (event) => {
+        if (event.target.matches("input")) {
+            updateToolbar(event.target);
+        }
+    });
+
+    grid.addEventListener("input", (event) => {
+        if (event.target.matches("input")) {
+            fitColumns();
+        }
+    });
+
+    boldButton.addEventListener("click", () => {
+        if (!selectedInput) {
+            return;
+        }
+        selectedInput.dataset.bold = selectedInput.dataset.bold === "true" ? "false" : "true";
+        applyFormat(selectedInput);
+        selectedInput.focus();
+    });
+
+    addRowButton.addEventListener("click", () => {
+        const body = grid.tBodies[0];
+        const row = document.createElement("tr");
+        const number = document.createElement("th");
+        number.scope = "row";
+        number.className = "spreadsheet-grid__row-number";
+        number.textContent = String(body.rows.length + 1);
+        row.appendChild(number);
+        const columnCount = grid.tHead.rows[0].cells.length - 1;
+        for (let column = 1; column <= columnCount; column += 1) {
+            const cell = document.createElement("td");
+            const input = document.createElement("input");
+            input.type = "text";
+            input.dataset.bold = "false";
+            input.dataset.fontSize = "11";
+            input.setAttribute("aria-label", `Zeile ${body.rows.length + 1}, Spalte ${column}`);
+            cell.appendChild(input);
+            row.appendChild(cell);
+        }
+        body.appendChild(row);
+        fitColumns();
+        row.querySelector("input").focus();
+    });
+
+    form.addEventListener("submit", () => {
+        payload.value = JSON.stringify(rowsToPayload());
+        formatsPayload.value = JSON.stringify(formatsToPayload());
+    });
+
+    fitColumns();
+})();
+
+(() => {
     const root = document.documentElement;
     const body = document.body;
     const toggle = document.querySelector("[data-menu-toggle]");

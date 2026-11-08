@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block page_title %}Excel-Tabelle bearbeiten{% endblock %}
+
+{% block content %}
+<section class="panel spreadsheet-editor" data-spreadsheet-editor>
+    <div class="panel__header spreadsheet-editor__header">
+        <div>
+            <p class="section-kicker">Dokumente · Excel</p>
+            <h2>{{ document.title }}</h2>
+            <p class="panel__lead">Änderungen werden direkt in der Excel-Datei gespeichert. Beim ersten Speichern wird die vorherige Version gesichert.</p>
+        </div>
+        <a href="{% url 'document-download' document.pk %}" class="button button--ghost">Excel herunterladen</a>
+    </div>
+
+    {% if editor.sheet_names|length > 1 %}
+    <nav class="spreadsheet-editor__sheets" aria-label="Arbeitsblätter">
+        {% for name in editor.sheet_names %}
+        <a
+            href="{% url 'document-spreadsheet-edit' document.pk %}?sheet={{ name|urlencode }}"
+            class="spreadsheet-editor__sheet{% if name == editor.sheet_name %} spreadsheet-editor__sheet--active{% endif %}"
+        >{{ name }}</a>
+        {% endfor %}
+    </nav>
+    {% endif %}
+
+    <form method="post" class="spreadsheet-editor__form" data-spreadsheet-form>
+        {% csrf_token %}
+        <input type="hidden" name="sheet" value="{{ editor.sheet_name }}">
+        <input type="hidden" name="revision" value="{{ document.spreadsheet_revision }}">
+        <input type="hidden" name="cells" value="" data-spreadsheet-payload>
+        <input type="hidden" name="formats" value="" data-spreadsheet-formats>
+        <div class="spreadsheet-editor__toolbar" aria-label="Zellformatierung">
+            <span class="spreadsheet-editor__toolbar-label">Ausgewählte Zelle</span>
+            <button type="button" class="button button--ghost spreadsheet-editor__format-button" data-spreadsheet-bold aria-pressed="false"><strong>Fett</strong></button>
+            <span class="spreadsheet-editor__selection" data-spreadsheet-selection>Bitte zuerst eine Zelle auswählen.</span>
+        </div>
+        <div class="spreadsheet-editor__help">
+            <span>Arbeitsblatt: <strong>{{ editor.sheet_name }}</strong></span>
+            <span>{{ editor.rows }} Zeilen · {{ editor.columns }} Spalten</span>
+        </div>
+        <div class="spreadsheet-editor__scroll" tabindex="0">
+            <table class="spreadsheet-grid" data-spreadsheet-grid>
+                <thead>
+                    <tr>
+                        <th scope="col" class="spreadsheet-grid__row-number">#</th>
+                        {% for cell in editor.grid.0 %}
+                        <th scope="col">{{ forloop.counter }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in editor.grid %}
+                    <tr>
+                        <th scope="row" class="spreadsheet-grid__row-number">{{ forloop.counter }}</th>
+                        {% for cell in row %}
+                        <td><input type="text" value="{{ cell.value }}" data-bold="{{ cell.bold|yesno:'true,false' }}" data-font-size="{{ cell.font_size }}" style="--spreadsheet-font-weight:{% if cell.bold %}700{% else %}400{% endif %};--spreadsheet-font-size:{{ cell.font_size }}pt" aria-label="Zeile {{ forloop.parentloop.counter }}, Spalte {{ forloop.counter }}"></td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="button-row">
+            <button type="button" class="button button--ghost" data-spreadsheet-add-row>Zeile hinzufügen</button>
+            <button type="submit" class="button">Änderungen speichern</button>
+            <a href="{% url 'document-scope' document.visibility|lower %}" class="button button--ghost">Zurück zu Dokumenten</a>
+        </div>
+    </form>
+</section>
+
+{% if revisions %}
+<section class="panel spreadsheet-history">
+    <div class="panel__header panel__header--compact">
+        <div>
+            <p class="section-kicker">Sicherung</p>
+            <h2>Versionsverlauf</h2>
+        </div>
+    </div>
+    <ul class="spreadsheet-history__list">
+        {% for item in revisions %}
+        <li>
+            <span>Version {{ item.revision }} · {{ item.saved_at|date:"d.m.Y H:i" }} · {{ item.saved_by.profile.display_name }}</span>
+            <a class="text-link" href="{% url 'spreadsheet-revision-download' document.pk item.revision %}">Herunterladen</a>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+{% endblock %}

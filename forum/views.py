@@ -41,8 +41,11 @@ def remove_pdf(storage, name):
 
 
 @login_required
+@never_cache
 def issue_list(request):
-    issues = Issue.objects.annotate(comment_count=Count("comments", filter=Q(comments__deleted_at__isnull=True)))
+    issues = Issue.objects.annotate(
+        comment_count=Count("comments", filter=Q(comments__deleted_at__isnull=True))
+    ).order_by("-publication_date", "-pk")
     page = Paginator(issues, 12).get_page(request.GET.get("page"))
     return render(request, "forum/list.html", {"page_obj": page, "can_manage": can_manage(request.user)})
 
@@ -55,6 +58,7 @@ def comments_for(user):
 
 
 @login_required
+@never_cache
 def issue_detail(request, pk):
     issue = get_object_or_404(Issue, pk=pk)
     roots = comments_for(request.user).filter(issue=issue, thread__isnull=True)

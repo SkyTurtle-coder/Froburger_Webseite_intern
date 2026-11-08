@@ -1,5 +1,6 @@
 import logging
 import mimetypes
+import json
 from pathlib import Path
 
 from django.contrib import messages
@@ -12,8 +13,9 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
 from .forms import DocumentEditForm, DocumentFolderForm, DocumentForm
-from .models import Document, DocumentFolder, FolderScope
+from .models import Document, DocumentFolder, FolderScope, SpreadsheetRevision
 from .policies import can_delete_document, can_download_document, can_edit_document, can_view_document
+from .spreadsheets import SpreadsheetError, get_editor_data, save_editor_data
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +184,7 @@ def _document_response(document, *, as_attachment):
     if not default_storage.exists(document.file.name):
         raise Http404("Die Datei wurde nicht gefunden.")
 
-    file_name = Path(document.file.name).name
+    file_name = document.file_name
     content_type, _encoding = mimetypes.guess_type(file_name)
     if document.is_pdf:
         content_type = "application/pdf"
@@ -312,6 +314,107 @@ def document_edit_view(request, pk):
             return redirect("document-scope", scope=document.visibility.lower())
 
     return render(request, "documents/document_edit.html", {"document": document, "form": form})
+
+
+@login_required
+def document_spreadsheet_edit_view(request, pk):
+    document = _get_editable_document(request, pk)
+    if not document.is_editable_spreadsheet:
+        raise Http404("Für dieses Dateiformat ist kein Tabellen-Editor verfügbar.")
+
+    if request.method == "POST":
+        raw_cells = request.POST.get("cells", "")
+        raw_formats = request.POST.get("formats", "[]") or "[]"
+        if len(raw_cells) > 1_500_000 or len(raw_formats) > 1_500_000:
+            messages.error(request, "Die Tabelle ist zu gross zum Speichern.")
+            return redirect("document-spreadsheet-edit", pk=document.pk)
+        try:
+            cells = json.loads(raw_cells)
+            formats = json.loads(raw_formats)
+            revision = int(request.POST.get("revision", ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            messages.error(request, "Die Tabellenänderungen konnten nicht gelesen werden.")
+            return redirect("document-spreadsheet-edit", pk=document.pk)
+
+        saved_names = ()
+        previous_file_name = ""
+        expired_revisions = []
+        try:
+            with transaction.atomic():
+                locked_document = Document.objects.select_for_update().get(pk=document.pk)
+                if not can_edit_document(request.user, locked_document):
+                    raise Http404
+                previous_file_name = locked_document.file.name
+                revision_file, new_file, next_revision = save_editor_data(
+                    locked_document,
+                    sheet_name=request.POST.get("sheet", ""),
+                    cells=cells,
+                    formats=formats,
+                    expected_revision=revision,
+                    user=request.user,
+                )
+                saved_names = (revision_file, new_file)
+                SpreadsheetRevision.objects.create(
+                    document=locked_document,
+                    revision=next_revision,
+                    file=revision_file,
+                    saved_by=request.user,
+                )
+                locked_document.file.name = new_file
+                locked_document.spreadsheet_revision = next_revision
+                locked_document.save(update_fields=("file", "spreadsheet_revision"))
+                expired_revisions = list(
+                    locked_document.spreadsheet_revisions.order_by("-revision")[5:]
+                )
+                for expired in expired_revisions:
+                    expired.delete()
+        except SpreadsheetError as exc:
+            messages.error(request, exc.messages[0])
+            return redirect("document-spreadsheet-edit", pk=document.pk)
+        except Exception:
+            for file_name in saved_names:
+                if file_name and default_storage.exists(file_name):
+                    default_storage.delete(file_name)
+            logger.exception("spreadsheet_save_failed user=%s document=%s", request.user.id, document.pk)
+            messages.error(request, "Die Tabelle konnte nicht gespeichert werden.")
+            return redirect("document-spreadsheet-edit", pk=document.pk)
+
+        # The previous working file's content now lives on in the revision
+        # backup just created above, so it would otherwise never be cleaned up.
+        if previous_file_name and previous_file_name not in saved_names:
+            _delete_file_if_present(previous_file_name)
+        for expired in expired_revisions:
+            _delete_file_if_present(expired.file.name)
+
+        logger.info("spreadsheet_saved user=%s document=%s", request.user.id, document.pk)
+        messages.success(request, "Die Tabelle wurde gespeichert. Es werden maximal fünf frühere Versionen aufbewahrt.")
+        return redirect("document-spreadsheet-edit", pk=document.pk)
+
+    try:
+        editor = get_editor_data(document, request.GET.get("sheet"))
+    except SpreadsheetError as exc:
+        return render(request, "documents/spreadsheet_unavailable.html", {"document": document, "error": exc.messages[0]}, status=400)
+
+    revisions = document.spreadsheet_revisions.select_related("saved_by__profile")[:5]
+    return render(
+        request,
+        "documents/spreadsheet_edit.html",
+        {"document": document, "editor": editor, "revisions": revisions},
+    )
+
+
+@login_required
+def spreadsheet_revision_download_view(request, pk, revision):
+    document = _get_viewable_document(request, pk)
+    item = get_object_or_404(SpreadsheetRevision, document=document, revision=revision)
+    if not default_storage.exists(item.file.name):
+        raise Http404("Die Version wurde nicht gefunden.")
+    return FileResponse(
+        default_storage.open(item.file.name, "rb"),
+        as_attachment=True,
+        filename=f"{Path(document.file_name).stem}-Version-{item.revision}.xlsx",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @login_required

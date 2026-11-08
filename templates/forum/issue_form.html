@@ -1,6 +1,7 @@
 {% extends "forum/base.html" %}
 {% block content %}
 <section class="panel"><p class="section-kicker">Forum verwalten</p><h2>{% if issue.pk %}Ausgabe bearbeiten{% else %}Ausgabe veröffentlichen{% endif %}</h2>
+    <p class="forum-meta">Du kannst auch ältere Ausgaben hochladen. Trage ihr ursprüngliches Veröffentlichungsdatum ein, damit sie an der richtigen Stelle in der Liste erscheinen.</p>
     <form method="post" enctype="multipart/form-data" class="form-stack">
         {% csrf_token %}{{ form.non_field_errors }}
         {% for field in form %}{% include "partials/form_field.html" %}{% endfor %}

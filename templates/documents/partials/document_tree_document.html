@@ -39,6 +39,15 @@
                 Herunterladen
             </a>
             {% endif %}
+            {% if document.can_edit and document.is_editable_spreadsheet %}
+            <a
+                href="{% url 'document-spreadsheet-edit' document.pk %}"
+                class="button document-action document-action--primary"
+                aria-label="Excel-Tabelle {{ document.title }} bearbeiten"
+            >
+                Tabelle öffnen
+            </a>
+            {% endif %}
             {% if document.can_edit %}
             <a
                 href="{% url 'document-edit' document.pk %}"

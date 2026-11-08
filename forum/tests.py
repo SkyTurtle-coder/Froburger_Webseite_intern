@@ -1,4 +1,6 @@
 import tempfile
+from datetime import timedelta
+from django.utils import timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,7 +70,7 @@ class ForumTests(TestCase):
     def test_managers_can_publish(self):
         for user in (self.webx, self.admin):
             self.client.force_login(user)
-            response = self.client.post(reverse("forum:create"), {"title": "Neue Ausgabe", "description": "Beschreibung", "pdf": pdf_upload()})
+            response = self.client.post(reverse("forum:create"), {"publication_date": timezone.localdate().isoformat(), "title": "Neue Ausgabe", "description": "Beschreibung", "pdf": pdf_upload()})
             self.assertEqual(response.status_code, 302)
             self.assertEqual(Issue.objects.order_by("-pk").first().author, user)
 
@@ -86,17 +88,17 @@ class ForumTests(TestCase):
 
     def test_invalid_pdf_and_missing_description_are_rejected(self):
         for upload in (pdf_upload("fake.html"), pdf_upload(content=b"<script>oops</script>")):
-            form = IssueForm({"title": "Test", "description": "Text"}, {"pdf": upload})
+            form = IssueForm({"publication_date": timezone.localdate().isoformat(), "title": "Test", "description": "Text"}, {"pdf": upload})
             self.assertFalse(form.is_valid())
             self.assertIn("pdf", form.errors)
-        form = IssueForm({"title": "Test"}, {"pdf": pdf_upload()})
+        form = IssueForm({"publication_date": timezone.localdate().isoformat(), "title": "Test"}, {"pdf": pdf_upload()})
         self.assertFalse(form.is_valid())
         self.assertIn("description", form.errors)
 
     def test_oversized_pdf_is_rejected(self):
         upload = pdf_upload()
         upload.size = 20 * 1024 * 1024 + 1
-        form = IssueForm({"title": "Test", "description": "Text"}, {"pdf": upload})
+        form = IssueForm({"publication_date": timezone.localdate().isoformat(), "title": "Test", "description": "Text"}, {"pdf": upload})
         self.assertFalse(form.is_valid())
         self.assertIn("pdf", form.errors)
 
@@ -104,11 +106,11 @@ class ForumTests(TestCase):
         self.client.force_login(self.webx)
         old_name = self.issue.pdf.name
         url = reverse("forum:edit", args=[self.issue.pk])
-        self.assertEqual(self.client.post(url, {"title": "Korrigiert", "description": "Text"}).status_code, 302)
+        self.assertEqual(self.client.post(url, {"publication_date": timezone.localdate().isoformat(), "title": "Korrigiert", "description": "Text"}).status_code, 302)
         self.issue.refresh_from_db()
         self.assertEqual(self.issue.pdf.name, old_name)
         with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post(url, {"title": "Neu", "description": "Text", "pdf": pdf_upload()})
+            response = self.client.post(url, {"publication_date": timezone.localdate().isoformat(), "title": "Neu", "description": "Text", "pdf": pdf_upload()})
         self.assertEqual(response.status_code, 302)
         self.issue.refresh_from_db()
         self.assertNotEqual(self.issue.pdf.name, old_name)
@@ -247,3 +249,58 @@ class ForumTests(TestCase):
         csrf_client.force_login(self.member)
         response = csrf_client.post(reverse("forum:comment-create", args=[self.issue.pk]), {"body": "Ohne Token"})
         self.assertEqual(response.status_code, 403)
+
+    def test_list_orders_by_publication_date_not_upload_date(self):
+        older = Issue.objects.create(title="Older issue uploaded later", author=self.webx,
+            description="Text", pdf=pdf_upload(), publication_date=timezone.localdate() - timedelta(days=30))
+        response = self.client.get(reverse("forum:list"))
+        self.assertEqual([issue.pk for issue in response.context["page_obj"]], [self.issue.pk, older.pk])
+        self.assertContains(response, 'class="forum-list"')
+        self.assertNotContains(response, 'class="forum-issues"')
+
+    def test_publication_date_does_not_delay_visibility(self):
+        self.issue.publication_date = timezone.localdate() + timedelta(days=10)
+        self.issue.save()
+        self.assertContains(self.client.get(reverse("forum:list")), self.issue.title)
+        self.assertEqual(self.client.get(self.issue.get_absolute_url()).status_code, 200)
+        response = self.client.get(reverse("forum:pdf", args=[self.issue.pk]))
+        self.assertEqual(response.status_code, 200)
+        response.close()
+        self.assertEqual(self.client.post(reverse("forum:comment-create", args=[self.issue.pk]), {"body": "Visible immediately"}).status_code, 302)
+
+    def test_manager_can_upload_historical_issue_and_change_date(self):
+        self.client.force_login(self.webx)
+        original_date = timezone.localdate() - timedelta(days=365)
+        response = self.client.post(reverse("forum:create"), {"title": "Historical issue", "description": "Text",
+            "publication_date": original_date.isoformat(), "pdf": pdf_upload()})
+        self.assertEqual(response.status_code, 302)
+        issue = Issue.objects.latest("pk")
+        self.assertEqual(issue.publication_date, original_date)
+        self.client.force_login(self.member)
+        self.assertEqual(self.client.get(issue.get_absolute_url()).status_code, 200)
+        response = self.client.get(reverse("forum:list"))
+        self.assertEqual([item.pk for item in response.context["page_obj"]], [self.issue.pk, issue.pk])
+        self.client.force_login(self.webx)
+        old_pdf = issue.pdf.name
+        response = self.client.post(reverse("forum:edit", args=[issue.pk]), {
+            "title": issue.title, "description": issue.description, "publication_date": "2020-03-01"})
+        self.assertEqual(response.status_code, 302)
+        issue.refresh_from_db()
+        self.assertEqual(issue.publication_date.isoformat(), "2020-03-01")
+        self.assertEqual(issue.pdf.name, old_pdf)
+        for value in ("", "not-a-date", "2026-02-30"):
+            form = IssueForm({"title": "Invalid date", "description": "Text", "publication_date": value}, instance=issue)
+            self.assertFalse(form.is_valid())
+            self.assertIn("publication_date", form.errors)
+
+    def test_migration_preserves_original_swiss_date(self):
+        from datetime import datetime, timezone as dt_timezone
+        from importlib import import_module
+        from types import SimpleNamespace
+        from django.apps import apps
+        from django.db import connection
+        Issue.objects.filter(pk=self.issue.pk).update(created_at=datetime(2024, 3, 31, 22, 30, tzinfo=dt_timezone.utc))
+        migration = import_module("forum.migrations.0002_issue_publication_date")
+        migration.preserve_publication_dates(apps, SimpleNamespace(connection=connection))
+        self.issue.refresh_from_db()
+        self.assertEqual(self.issue.publication_date.isoformat(), "2024-04-01")

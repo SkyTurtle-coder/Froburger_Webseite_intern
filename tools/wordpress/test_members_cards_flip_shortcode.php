@@ -28,13 +28,13 @@ function avf_cards_test_payload() {
 	return array(
 		'schema_version' => 2,
 		'generated_at'   => '2026-08-06T20:00:00+00:00',
-		'member_count'   => 5,
+		'member_count'   => 7,
 		'content_hash'   => 'not-validated-for-stored-snapshot-tests',
 		'section_order'  => array( 'committee', 'salon', 'stall', 'altfroburger', 'af_committee' ),
 		'sections'       => array(
 			'committee' => array(
 				'title'   => 'Komitee',
-				'count'   => 1,
+				'count'   => 2,
 				'members' => array(
 					array(
 						'id'             => 101,
@@ -61,11 +61,36 @@ function avf_cards_test_payload() {
 							'variants'  => array(),
 						),
 					),
+					array(
+						'id'             => 102,
+						'display_name'   => 'Quentin Kasse',
+						'first_name'     => 'Quentin',
+						'last_name'      => 'Kasse',
+						'vulgo'          => '',
+						'entry_year'     => 2023,
+						'entry_semester' => 'FS',
+						'entry_display'  => '2023 FS',
+						'academic_title' => '',
+						'degree_program' => '',
+						'roles'          => array(
+							array(
+								'key'        => 'quaestor',
+								'label'      => 'Quästor',
+								'sort_order' => 50,
+							),
+						),
+						'photo'          => array(
+							'available' => false,
+							'fallback'  => true,
+							'token'     => '',
+							'variants'  => array(),
+						),
+					),
 				),
 			),
 			'salon' => array(
 				'title'   => 'Der Salon',
-				'count'   => 1,
+				'count'   => 2,
 				'members' => array(
 					array(
 						'id'             => 201,
@@ -167,6 +192,31 @@ function avf_cards_test_payload() {
 							'variants'  => array(),
 						),
 					),
+					array(
+						'id'             => 502,
+						'display_name'   => 'Theo Toten',
+						'first_name'     => 'Theo',
+						'last_name'      => 'Toten',
+						'vulgo'          => '',
+						'entry_year'     => 1991,
+						'entry_semester' => 'HS',
+						'entry_display'  => '1991 HS',
+						'academic_title' => '',
+						'degree_program' => '',
+						'roles'          => array(
+							array(
+								'key'        => 'af_totenfeiern',
+								'label'      => 'Beauftragter für Totenfeiern',
+								'sort_order' => 170,
+							),
+						),
+						'photo'          => array(
+							'available' => false,
+							'fallback'  => true,
+							'token'     => '',
+							'variants'  => array(),
+						),
+					),
 				),
 			),
 		),
@@ -190,6 +240,9 @@ try {
 	avf_cards_assert( false !== strpos( $af_committee_html, 'AF-PrÃ¤sident' ), 'Expected AF committee role label.' );
 	avf_cards_assert( false !== strpos( $committee_html, 'Senior' ), 'Expected committee role label when show_role=1.' );
 	avf_cards_assert( false === strpos( $committee_no_role_html, 'Senior' ), 'Expected committee role label to be hidden when show_role=0.' );
+	avf_cards_assert( false !== strpos( $af_committee_html, 'Beauftragter für Totenfeiern' ), 'Expected AF committee Totenfeiern role label.' );
+	avf_cards_assert( false !== strpos( $committee_html, 'Quästor' ), 'Expected Quästor role label when show_role=1.' );
+	avf_cards_assert( false === strpos( $committee_no_role_html, 'Quästor' ), 'Expected Quästor role label to be hidden when show_role=0.' );
 	avf_cards_assert( false !== strpos( $committee_html, 'Philipp ThÃ¼rlemann' ), 'Expected full name in details panel.' );
 	avf_cards_assert( false !== strpos( $committee_html, 'v/o Newton' ), 'Expected vulgo in details panel.' );
 	avf_cards_assert( false !== strpos( $committee_html, '2022 HS' ), 'Expected entry display in details panel.' );

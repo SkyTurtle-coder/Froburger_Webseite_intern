@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block page_title %}Excel-Tabelle{% endblock %}
+
+{% block content %}
+<section class="panel panel--narrow">
+    <p class="section-kicker">Dokumente · Excel</p>
+    <h2>Die Tabelle kann nicht im Browser geöffnet werden</h2>
+    <p class="panel__lead">{{ error }}</p>
+    <div class="button-row">
+        <a href="{% url 'document-download' document.pk %}" class="button">Excel herunterladen</a>
+        <a href="{% url 'document-scope' document.visibility|lower %}" class="button button--ghost">Zurück zu Dokumenten</a>
+    </div>
+</section>
+{% endblock %}
