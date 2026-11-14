@@ -4,19 +4,22 @@ umask 077
 release="${1:?Release fehlt}"
 [[ "$release" =~ ^avf-event-internal-[0-9]{8}-[0-9]{6}$ ]]
 [[ "${2:?Hash fehlt}" =~ ^[a-f0-9]{64}$ && "${3:?Hash fehlt}" =~ ^[a-f0-9]{64}$ ]]
+[[ "${4:?Previous hash fehlt}" =~ ^[a-f0-9]{64}$ ]]
 app=/srv/avf-intern/app
 stage=/tmp/$release
 backup=/srv/avf-intern/backups/$release
 files=(events/models.py events/forms.py events/views.py events/public_views.py events/admin.py templates/events/event_list.html templates/events/public_event_detail.html)
 migration=events/migrations/0011_event_is_internal.py
 python3 -c 'import hashlib,sys; assert hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest() == sys.argv[2]; assert hashlib.sha256(open(sys.argv[3],"rb").read()).hexdigest() == sys.argv[4]' "$stage/new.tar.gz" "$2" "$stage/base.tar.gz" "$3"
-mkdir "$stage/new" "$stage/base" "$stage/current"
+python3 -c 'import hashlib,sys; assert hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest() == sys.argv[2]' "$stage/previous.tar.gz" "$4"
+mkdir "$stage/new" "$stage/base" "$stage/previous" "$stage/current"
 tar -xzf "$stage/new.tar.gz" -C "$stage/new"
 tar -xzf "$stage/base.tar.gz" -C "$stage/base"
+tar -xzf "$stage/previous.tar.gz" -C "$stage/previous"
 for file in "${files[@]}"; do
     mkdir -p "$stage/current/$(dirname "$file")"
     sudo cat "$app/$file" | sed 's/\r$//' > "$stage/current/$file"
-    if ! cmp -s "$stage/current/$file" "$stage/base/$file" && ! cmp -s "$stage/current/$file" "$stage/new/$file"; then
+    if ! cmp -s "$stage/current/$file" "$stage/base/$file" && ! cmp -s "$stage/current/$file" "$stage/new/$file" && ! cmp -s "$stage/current/$file" "$stage/previous/$file"; then
         printf 'Serverdatei weicht ab: %s. Nichts installiert.\n' "$file" >&2
         exit 1
     fi
