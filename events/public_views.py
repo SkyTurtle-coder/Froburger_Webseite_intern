@@ -31,7 +31,7 @@ def _public_queryset():
 
 
 def _homepage_queryset():
-    return _public_queryset().filter(show_on_homepage=True).exclude(status="INTERN")
+    return _public_queryset().filter(show_on_homepage=True, is_internal=False).exclude(status="INTERN")
 
 
 def _event_to_payload(event):
@@ -43,7 +43,8 @@ def _event_to_payload(event):
         "slug": event.slug,
         "short_description": event.short_description,
         "status": event.status,
-        "status_label": event.get_status_display(),
+        "status_label": event.status_label,
+        "is_internal": event.is_internal or event.status == "INTERN",
         "start_at": start_at.isoformat(),
         "start_timing": event.start_timing,
         "end_at": end_at.isoformat(),

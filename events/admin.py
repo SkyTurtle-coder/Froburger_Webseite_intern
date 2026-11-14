@@ -5,8 +5,8 @@ from .models import Event, EventSignup, EventSignupColumn
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("title", "slug", "start", "start_timing", "end", "status", "is_public", "show_on_homepage")
-    list_filter = ("status", "is_public", "show_on_homepage")
+    list_display = ("title", "slug", "start", "start_timing", "end", "status", "is_internal", "is_public", "show_on_homepage")
+    list_filter = ("status", "is_internal", "is_public", "show_on_homepage")
     prepopulated_fields = {"slug": ("title",)}
 
 

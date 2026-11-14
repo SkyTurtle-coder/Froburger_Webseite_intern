@@ -34,6 +34,7 @@ class Event(models.Model):
     end = models.DateTimeField()
     location = models.CharField(max_length=200, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES)
+    is_internal = models.BooleanField("Intern", default=False)
     is_public = models.BooleanField(default=False)
     is_cancelled = models.BooleanField(default=False)
     show_on_homepage = models.BooleanField(default=False)
@@ -50,6 +51,11 @@ class Event(models.Model):
     def __str__(self):
         return self.title
 
+    @property
+    def status_label(self):
+        label = self.get_status_display()
+        return f"{label} + Intern" if self.is_internal and self.status != "INTERN" else label
+
     def get_absolute_url(self):
         return reverse("event-list")
 
@@ -63,7 +69,7 @@ class Event(models.Model):
                 errors["short_description"] = "Öffentliche Anlässe benötigen eine Kurzbeschreibung."
             if not self.location.strip():
                 errors["location"] = "Öffentliche Anlässe benötigen einen Ort."
-            if self.status == "INTERN" and self.show_on_homepage:
+            if (self.is_internal or self.status == "INTERN") and self.show_on_homepage:
                 errors["show_on_homepage"] = "Interne Anlässe dürfen nicht auf der Startseite erscheinen."
             if errors:
                 raise ValidationError(errors)
@@ -71,6 +77,11 @@ class Event(models.Model):
             raise ValidationError({"show_on_homepage": "Startseitenanzeige ist nur für WordPress-sichtbare Anlässe möglich."})
 
     def save(self, *args, **kwargs):
+        # Preserve the meaning of legacy records and callers using status=INTERN.
+        if self.status == "INTERN":
+            self.is_internal = True
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"is_internal"}
         if not self.calendar_uid:
             self.calendar_uid = f"event-{uuid.uuid4()}@avfroburger.ch"
 
@@ -93,6 +104,7 @@ class Event(models.Model):
                 "end",
                 "location",
                 "status",
+                "is_internal",
                 "is_public",
                 "is_cancelled",
             ).first()
@@ -106,6 +118,7 @@ class Event(models.Model):
                     "end": self.end,
                     "location": self.location,
                     "status": self.status,
+                    "is_internal": self.is_internal,
                     "is_public": self.is_public,
                     "is_cancelled": self.is_cancelled,
                 }

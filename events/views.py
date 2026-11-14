@@ -44,7 +44,9 @@ class EventListView(RoleAccessMixin, ListView):
             queryset = queryset.filter(end__gte=now)
         elif timing == "past":
             queryset = queryset.filter(end__lt=now)
-        if status:
+        if status == "INTERN":
+            queryset = queryset.filter(Q(is_internal=True) | Q(status="INTERN"))
+        elif status:
             queryset = queryset.filter(status=status)
         return queryset
 

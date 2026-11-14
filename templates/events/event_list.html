@@ -78,7 +78,7 @@
                     <td>{{ event.start|date:"d.m.Y H:i" }}{% if event.start_timing %} {{ event.get_start_timing_display }}{% endif %}</td>
                     <td>{{ event.end|date:"d.m.Y H:i" }}</td>
                     <td>{{ event.location|default:"-" }}</td>
-                    <td>{{ event.get_status_display }}</td>
+                    <td>{{ event.status_label }}</td>
                     <td>
                         {% if event.is_public %}
                         <span class="tag">Ja</span>

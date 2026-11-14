@@ -34,6 +34,7 @@ class EventForm(forms.ModelForm):
             "signup_deadline_at",
             "location",
             "status",
+            "is_internal",
             "is_public",
             "is_cancelled",
             "show_on_homepage",
@@ -48,17 +49,33 @@ class EventForm(forms.ModelForm):
             "signup_deadline_at": "Anmeldeschluss",
             "location": "Ort",
             "status": "Status",
+            "is_internal": "Intern",
             "is_public": "Öffentlich sichtbar",
             "is_cancelled": "Abgesagt",
             "show_on_homepage": "Auf Startseite zeigen",
         }
         help_texts = {
+            "is_internal": "Zusatz zu Off, Inoff, Iaoff oder Hochoff. Unabhängig von der Sichtbarkeit; die Anmeldung wird dadurch derzeit noch nicht eingeschränkt.",
             "slug": "Leer lassen für automatische Generierung.",
             "short_description": "Pflicht für öffentliche Anlässe.",
             "location": "Pflicht für öffentliche Anlässe.",
             "signup_deadline_at": "Optional. Ohne Eingabe endet die Anmeldung am Veranstaltungstag um 00:01 Uhr.",
             "is_cancelled": "Abgesagte Anlässe bleiben im Kalender als Absage sichtbar.",
         }
+
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = [(value, label) for value, label in Event.STATUS_CHOICES if value != "INTERN"]
+        if self.instance.pk and self.instance.status == "INTERN":
+            choices.insert(0, ("INTERN", "Intern (bisheriger Status ohne weitere Einstufung)"))
+        self.fields["status"].choices = [("", "Bitte wählen"), *choices]
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("status") == "INTERN" and not cleaned.get("is_internal"):
+            self.add_error("status", "Bitte Off, Inoff, Iaoff oder Hochoff auswählen, bevor du Intern entfernst.")
+        return cleaned
 
 
 class EventSignupColumnForm(forms.ModelForm):
