@@ -4,22 +4,25 @@ umask 077
 release="${1:?Release fehlt}"
 [[ "$release" =~ ^avf-member-signup-[0-9]{8}-[0-9]{6}$ ]]
 [[ "${2:?Hash fehlt}" =~ ^[a-f0-9]{64}$ && "${3:?Hash fehlt}" =~ ^[a-f0-9]{64}$ ]]
+[[ "${4:?Previous-Hash fehlt}" =~ ^[a-f0-9]{64}$ ]]
 app=/srv/avf-intern/app
 stage=/tmp/$release
 backup=/srv/avf-intern/backups/$release
 files=(events/models.py events/views.py events/public_views.py templates/events/public_event_detail.html)
-additions=(events/member_signup.py events/migrations/0012_member_signup_policy.py)
+additions=(events/member_signup.py events/migrations/0012_member_signup_policy.py events/migrations/0013_progressive_signup_lock.py)
 python3 -c 'import hashlib,sys; assert hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest() == sys.argv[2]; assert hashlib.sha256(open(sys.argv[3],"rb").read()).hexdigest() == sys.argv[4]' "$stage/new.tar.gz" "$2" "$stage/base.tar.gz" "$3"
-mkdir "$stage/new" "$stage/base" "$stage/current"
+python3 -c 'import hashlib,sys; assert hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest() == sys.argv[2]' "$stage/previous.tar.gz" "$4"
+mkdir "$stage/new" "$stage/base" "$stage/previous" "$stage/current"
 tar -xzf "$stage/new.tar.gz" -C "$stage/new"
 tar -xzf "$stage/base.tar.gz" -C "$stage/base"
+tar -xzf "$stage/previous.tar.gz" -C "$stage/previous"
 backup_files=("${files[@]}")
 created_files=()
 for file in "${files[@]}" "${additions[@]}"; do
     if sudo test -f "$app/$file"; then
         mkdir -p "$stage/current/$(dirname "$file")"
         sudo cat "$app/$file" | sed 's/\r$//' > "$stage/current/$file"
-        if ! cmp -s "$stage/current/$file" "$stage/base/$file" && ! cmp -s "$stage/current/$file" "$stage/new/$file"; then
+        if ! cmp -s "$stage/current/$file" "$stage/base/$file" && ! cmp -s "$stage/current/$file" "$stage/previous/$file" && ! cmp -s "$stage/current/$file" "$stage/new/$file"; then
             printf 'Serverdatei weicht ab: %s. Nichts installiert.\n' "$file" >&2
             exit 1
         fi
@@ -72,11 +75,11 @@ for file in "${files[@]}" "${additions[@]}"; do
     sudo install -m 644 -o avfapp -g avfapp "$stage/new/$file" "$app/$file"
 done
 django check
-django shell -c 'from django.db import connection; from django.db.migrations.executor import MigrationExecutor; target=("events","0012_member_signup_policy"); plan=MigrationExecutor(connection).migration_plan([target]); assert all((m.app_label,m.name)==target and not backwards for m,backwards in plan), "Unerwarteter Migrationsplan"'
+django shell -c 'from django.db import connection; from django.db.migrations.executor import MigrationExecutor; target=("events","0013_progressive_signup_lock"); allowed={target,("events","0012_member_signup_policy")}; plan=MigrationExecutor(connection).migration_plan([target]); assert all((m.app_label,m.name) in allowed and not backwards for m,backwards in plan), "Unerwarteter Migrationsplan"'
 phase=migrating
-django migrate events 0012_member_signup_policy --noinput
+django migrate events 0013_progressive_signup_lock --noinput
 phase=migrated
-django shell -c 'from events.models import Event,EventSignup,SignupAttemptWindow; from events.public_views import _detail_payload; from events.member_signup import is_internal; list(EventSignup.objects.values_list("member_profile_id",flat=True)[:1]); SignupAttemptWindow.objects.count(); assert all(_detail_payload(e)["signups"] == [] for e in Event.objects.all() if is_internal(e))'
+django shell -c 'from events.models import Event,EventSignup,SignupAttemptWindow; from events.public_views import _detail_payload; from events.member_signup import is_internal, BLOCK_SECONDS; list(EventSignup.objects.values_list("member_profile_id",flat=True)[:1]); list(SignupAttemptWindow.objects.values("failed_attempts","penalty_level","blocked_until","penalty_reset_at")[:1]); assert BLOCK_SECONDS[:7] == (30,60,120,300,600,1800,3600); assert all(_detail_payload(e)["signups"] == [] for e in Event.objects.all() if is_internal(e))'
 sudo systemctl start avf-intern
 ready=0
 for attempt in 1 2 3 4 5; do
