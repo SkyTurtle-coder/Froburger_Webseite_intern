@@ -19,7 +19,7 @@ from accounts.models import CalendarSubscription
 from . import signing
 from .calendar_service import CalendarFeedService, CalendarResponseBuilder
 from .models import Event, EventSignup, EventSignupColumn
-from .member_signup import DENIED_MESSAGE, attempt_allowed, is_internal, resolve_member
+from .member_signup import DENIED_MESSAGE, attempt_allowed, is_internal, record_failure, resolve_member
 
 
 SIGNUP_RATE_LIMIT_SECONDS = 15
@@ -391,6 +391,12 @@ def v1_event_signup_api(request, slug):
     if auth_error is not None:
         return auth_error
 
+    client_key = None
+
+    def deny_member():
+        record_failure(client_key)
+        return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+
     try:
         # MariaDB cannot create the conditional unique constraint used for
         # soft-deleted signups. Locking the parent event serializes all
@@ -422,38 +428,38 @@ def v1_event_signup_api(request, slug):
                     return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
                 member = resolve_member(payload.get("vulgo"))
                 if member is None:
-                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                    return deny_member()
             operation = payload.get("operation", "create")
             if operation in ("read", "update"):
                 response = _edit_signup(event, payload, operation, member=member)
                 if is_internal(event) and response.status_code >= 400:
-                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                    return deny_member()
                 return response
             if operation != "create":
                 if is_internal(event):
-                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                    return deny_member()
                 return _error_response("invalid_payload", "Ungültige Anfrage.", 400)
             if not is_internal(event) and _signup_throttled(event.pk, request):
                 return _error_response("rate_limited", "Bitte warte kurz, bevor du das Formular erneut absendest.", 429)
             cleaned, error = _normalize_signup_payload(event, payload)
             if error is not None:
                 if is_internal(event):
-                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                    return deny_member()
                 code, message, status = error
                 return _error_response(code, message, status)
 
             normalized_vulgo = EventSignup.normalize_vulgo(cleaned["vulgo"])
             if EventSignup.objects.filter(event=event, normalized_vulgo=normalized_vulgo).exists():
                 if is_internal(event):
-                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                    return deny_member()
                 return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
             if member and EventSignup.objects.filter(event=event, member_profile=member).exists():
-                return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                return deny_member()
 
             pin = payload.get("pin")
             if not isinstance(pin, str) or re.fullmatch(r"[0-9]{4,6}", pin) is None:
                 if is_internal(event):
-                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                    return deny_member()
                 return _error_response("invalid_pin", "Der PIN muss aus 4 bis 6 Ziffern bestehen.", 400)
 
             signup = EventSignup(
@@ -469,7 +475,7 @@ def v1_event_signup_api(request, slug):
         return _error_response("event_not_found", "Dieser Anlass wurde nicht gefunden.", 404)
     except IntegrityError:
         if is_internal(event):
-            return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+            return deny_member()
         return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
 
     _mark_signup_attempt(event.pk, request)

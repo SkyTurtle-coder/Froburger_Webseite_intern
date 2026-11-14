@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.cache import cache
@@ -8,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import Role
-from .member_signup import DENIED_MESSAGE, attempt_allowed
+from .member_signup import ATTEMPT_LIMIT, BLOCK_SECONDS, DENIED_MESSAGE, attempt_allowed, record_failure
 from .models import Event, EventSignup, SignupAttemptWindow
 from .signing import compute_signature
 from .views import PublicEventDetailView
@@ -139,12 +140,12 @@ class MemberSignupTests(TestCase):
         self.assert_denied(self.send(vulgo="Unknown"))
 
     def test_rate_limit_counts_failures_across_operations_and_cache_resets(self):
-        for number in range(20):
+        for number in range(5):
             self.assert_denied(self.send(vulgo="Missing" + str(number)))
             cache.clear()
         self.assert_denied(self.send())
-        self.assertEqual(SignupAttemptWindow.objects.get().attempts, 20)
-        SignupAttemptWindow.objects.update(expires_at=timezone.now() - timedelta(seconds=1))
+        self.assertEqual(SignupAttemptWindow.objects.get().attempts, 5)
+        SignupAttemptWindow.objects.update(blocked_until=timezone.now() - timedelta(seconds=1))
         self.assertEqual(self.send().status_code, 201)
 
     def test_unsigned_request_denied(self):
@@ -154,9 +155,9 @@ class MemberSignupTests(TestCase):
         self.assertFalse(EventSignup.objects.exists())
 
     def test_invalid_fields_do_not_provide_a_membership_lookup(self):
-        for changes in ({"pin": "bad"}, {"attending": "bad"}, {"operation": "lookup"}, {"extra": "bad"}):
-            self.assert_denied(self.send(**changes))
-            self.assert_denied(self.send(vulgo="Unknown", **changes))
+        for number, changes in enumerate(({"pin": "bad"}, {"attending": "bad"}, {"operation": "lookup"}, {"extra": "bad"})):
+            self.assert_denied(self.send(client_key=f"{number:064x}", **changes))
+            self.assert_denied(self.send(vulgo="Unknown", client_key=f"{number:064x}", **changes))
 
     def test_member_cannot_claim_another_profiles_linked_signup(self):
         other = User.objects.create_user("other").profile
@@ -170,3 +171,88 @@ class MemberSignupTests(TestCase):
         for _ in range(5):
             self.assert_denied(self.send(operation="read", pin="9999"))
         self.assert_denied(self.send(operation="read"))
+
+    def test_fifth_failure_blocks_valid_vulgos_without_querying_members(self):
+        for _ in range(4):
+            self.assert_denied(self.send(vulgo="Unknown"))
+        self.assertIsNone(SignupAttemptWindow.objects.get().blocked_until)
+        before = timezone.now()
+        self.assert_denied(self.send(vulgo="Unknown"))
+        window = SignupAttemptWindow.objects.get()
+        self.assertGreaterEqual(window.blocked_until, before + timedelta(seconds=30))
+        self.assertEqual(window.penalty_level, 1)
+        with patch("events.public_views.resolve_member") as resolve:
+            self.assert_denied(self.send())
+            self.assert_denied(self.send(operation="read"))
+            resolve.assert_not_called()
+        window.refresh_from_db()
+        self.assertEqual(window.failed_attempts, 0)
+        self.assertEqual(window.attempts, 5)
+        self.assertEqual(self.send(client_key="b" * 64).status_code, 201)
+
+    def test_progressive_durations_expiry_and_maximum(self):
+        now = timezone.now()
+        with patch("events.member_signup.timezone") as clock:
+            for duration in (*BLOCK_SECONDS, BLOCK_SECONDS[-1]):
+                clock.now.return_value = now
+                for _ in range(5):
+                    self.assertTrue(attempt_allowed("visitor"))
+                    record_failure("visitor")
+                window = SignupAttemptWindow.objects.get()
+                self.assertEqual(window.blocked_until, now + timedelta(seconds=duration))
+                self.assertFalse(attempt_allowed("visitor"))
+                # Retrying during a block must not move its deadline or tier.
+                record_failure("visitor")
+                window.refresh_from_db()
+                self.assertEqual(window.blocked_until, now + timedelta(seconds=duration))
+                now = window.blocked_until
+
+    def test_escalation_resets_only_after_quiet_period(self):
+        now = timezone.now()
+        with patch("events.member_signup.timezone") as clock:
+            clock.now.return_value = now
+            for _ in range(5):
+                self.assertTrue(attempt_allowed("visitor"))
+                record_failure("visitor")
+            clock.now.return_value = now + timedelta(seconds=30)
+            self.assertTrue(attempt_allowed("visitor"))
+            self.assertEqual(SignupAttemptWindow.objects.get().penalty_level, 1)
+            clock.now.return_value = now + timedelta(seconds=30, days=1)
+            self.assertTrue(attempt_allowed("visitor"))
+            self.assertEqual(SignupAttemptWindow.objects.get().penalty_level, 0)
+            for _ in range(5):
+                record_failure("visitor")
+            self.assertEqual(SignupAttemptWindow.objects.get().blocked_until, clock.now.return_value + timedelta(seconds=30))
+
+    def test_success_does_not_erase_failed_attempts(self):
+        for _ in range(4):
+            self.assert_denied(self.send(vulgo="Unknown"))
+        self.assertEqual(self.send().status_code, 201)
+        self.assertEqual(SignupAttemptWindow.objects.get().failed_attempts, 4)
+        self.assert_denied(self.send(vulgo="Unknown"))
+        self.assertIsNotNone(SignupAttemptWindow.objects.get().blocked_until)
+
+    def test_lock_applies_across_events(self):
+        for _ in range(5):
+            self.assert_denied(self.send(vulgo="Unknown"))
+        start = timezone.now() + timedelta(days=10)
+        self.event = Event.objects.create(title="Other", status="OFF", is_internal=True,
+                                         is_public=True, start=start, end=start)
+        self.assert_denied(self.send())
+
+    def test_cleanup_preserves_escalation_and_general_limit_remains(self):
+        now = timezone.now()
+        with patch("events.member_signup.timezone") as clock:
+            clock.now.return_value = now
+            for _ in range(5):
+                self.assertTrue(attempt_allowed("visitor"))
+                record_failure("visitor")
+            SignupAttemptWindow.objects.update(expires_at=now - timedelta(days=2))
+            self.assertTrue(attempt_allowed("other"))
+            self.assertEqual(SignupAttemptWindow.objects.count(), 2)
+            for _ in range(ATTEMPT_LIMIT - 1):
+                self.assertTrue(attempt_allowed("other"))
+            self.assertFalse(attempt_allowed("other"))
+            clock.now.return_value = now + timedelta(days=3)
+            self.assertTrue(attempt_allowed("new"))
+            self.assertEqual(SignupAttemptWindow.objects.count(), 1)

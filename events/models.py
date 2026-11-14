@@ -266,6 +266,10 @@ class SignupAttemptWindow(models.Model):
     key = models.CharField(max_length=64, primary_key=True)
     attempts = models.PositiveIntegerField(default=0)
     expires_at = models.DateTimeField(db_index=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+    penalty_level = models.PositiveSmallIntegerField(default=0)
+    blocked_until = models.DateTimeField(null=True, blank=True)
+    penalty_reset_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
 
 class EventSignup(models.Model):
