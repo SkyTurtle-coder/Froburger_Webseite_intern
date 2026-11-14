@@ -68,14 +68,28 @@ class EventInternalFlagTests(TestCase):
         self.event.refresh_from_db()
         self.assertTrue(self.event.is_internal)
         self.assertEqual(self.event.status_label, "Intern")
-        form = EventForm(self.payload(status="INTERN"), instance=self.event)
+        form = EventForm(self.payload(status=""), instance=self.event)
         self.assertTrue(form.is_valid(), form.errors)
         form.save()
-        invalid = EventForm(self.payload(status="INTERN", is_internal=False), instance=self.event)
+        invalid = EventForm(self.payload(status="", is_internal=False), instance=self.event)
         self.assertFalse(invalid.is_valid())
         form = EventForm(self.payload(status="HOCHOFF"), instance=self.event)
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.save().status_label, "Hochoff + Intern")
+
+    def test_internal_only_creation_and_edit_form(self):
+        self.client.force_login(self.manager)
+        response = self.client.post(reverse("event-create"), self.payload(status=""))
+        self.assertEqual(response.status_code, 302)
+        event = Event.objects.get(title="Edited event")
+        self.assertEqual(event.status_label, "Intern")
+        self.assertTrue(event.is_internal)
+        form = EventForm(instance=event)
+        self.assertEqual(form.initial["status"], "")
+        self.assertNotIn("INTERN", dict(form.fields["status"].choices))
+        self.assertFalse(form.fields["status"].required)
+        self.assertTrue(form.initial["is_internal"])
+        self.assertFalse(EventForm(self.payload(status="", is_internal=False)).is_valid())
 
     def test_internal_cannot_be_on_homepage_but_can_remain_public(self):
         self.event.is_internal = True

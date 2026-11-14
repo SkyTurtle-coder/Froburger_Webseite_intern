@@ -2,9 +2,12 @@
 
 `Event.is_internal` is a separate boolean, independent of `is_public`.
 New events select OFF, INOFF, IAOFF or HOCHOFF and may additionally be internal.
-Existing status=INTERN events keep that status; migration 0011 backfills their
-new flag. Their edit form preserves the legacy choice until a primary status
-is explicitly selected. No existing event is arbitrarily classified as OFF.
+Existing status=INTERN events keep that storage representation; migration 0011
+backfills their new flag. All forms omit INTERN from the dropdown. An empty
+primary status is valid only with the internal checkbox and is stored as
+status=INTERN for compatibility. Existing internal-only events render with an
+empty dropdown and the checkbox selected. No additional migration is needed.
+
 
 The list, detail template and API label show e.g. `Off + Intern`. The API retains
 the existing status string and adds an `is_internal` boolean. The existing

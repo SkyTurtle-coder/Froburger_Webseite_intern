@@ -1,10 +1,17 @@
 from django.contrib import admin
 
 from .models import Event, EventSignup, EventSignupColumn
+from .forms import EventForm
+
+
+class AdminEventForm(EventForm):
+    class Meta(EventForm.Meta):
+        fields = "__all__"
 
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
+    form = AdminEventForm
     list_display = ("title", "slug", "start", "start_timing", "end", "status", "is_internal", "is_public", "show_on_homepage")
     list_filter = ("status", "is_internal", "is_public", "show_on_homepage")
     prepopulated_fields = {"slug": ("title",)}

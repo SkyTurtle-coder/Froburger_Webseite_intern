@@ -55,7 +55,7 @@ class EventForm(forms.ModelForm):
             "show_on_homepage": "Auf Startseite zeigen",
         }
         help_texts = {
-            "is_internal": "Zusatz zu Off, Inoff, Iaoff oder Hochoff. Unabhängig von der Sichtbarkeit; die Anmeldung wird dadurch derzeit noch nicht eingeschränkt.",
+            "is_internal": "Allein oder zusammen mit Off, Inoff, Iaoff oder Hochoff auswählbar. Unabhängig von der Sichtbarkeit; die Anmeldung wird dadurch derzeit noch nicht eingeschränkt.",
             "slug": "Leer lassen für automatische Generierung.",
             "short_description": "Pflicht für öffentliche Anlässe.",
             "location": "Pflicht für öffentliche Anlässe.",
@@ -67,14 +67,20 @@ class EventForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         choices = [(value, label) for value, label in Event.STATUS_CHOICES if value != "INTERN"]
-        if self.instance.pk and self.instance.status == "INTERN":
-            choices.insert(0, ("INTERN", "Intern (bisheriger Status ohne weitere Einstufung)"))
-        self.fields["status"].choices = [("", "Bitte wählen"), *choices]
+        self.fields["status"].choices = [("", "Keine weitere Einstufung"), *choices]
+        self.fields["status"].required = False
+        if self.instance.status == "INTERN":
+            self.initial["status"] = ""
+            self.initial["is_internal"] = True
 
     def clean(self):
         cleaned = super().clean()
-        if cleaned.get("status") == "INTERN" and not cleaned.get("is_internal"):
-            self.add_error("status", "Bitte Off, Inoff, Iaoff oder Hochoff auswählen, bevor du Intern entfernst.")
+        if not cleaned.get("status"):
+            if cleaned.get("is_internal"):
+                # Preserve the existing storage/API representation of internal-only events.
+                cleaned["status"] = "INTERN"
+            else:
+                self.add_error("status", "Bitte einen Status auswählen oder Intern aktivieren.")
         return cleaned
 
 
