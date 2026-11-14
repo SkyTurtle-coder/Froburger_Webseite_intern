@@ -79,7 +79,9 @@
                             <dd>{% if event.is_signup_closed %}geschlossen{% else %}offen{% endif %}</dd>
                         </div>
                     </div>
-                    {% if event.is_signup_closed %}
+                    {% if event.is_internal or event.status == 'INTERN' %}
+                    <a class="button" href="{{ wordpress_fallback_url }}#anmelden">Zur Anmeldung</a>
+                    {% elif event.is_signup_closed %}
                     <p class="panel__lead">Die Einschreibung ist geschlossen. Die bisher eingetragenen Personen bleiben unten sichtbar.</p>
                     {% else %}
                     <form method="post" class="form-stack public-signup-form" novalidate>
@@ -91,6 +93,7 @@
                 </aside>
             </section>
 
+            {% if not event.is_internal and event.status != 'INTERN' %}
             <section class="panel panel--public-table">
                 <div class="panel__header">
                     <div>
@@ -129,6 +132,7 @@
                 </div>
             </section>
 
+            {% endif %}
             {% if wordpress_fallback_url %}
             <section class="panel panel--narrow panel--public-link">
                 <div class="panel__header">

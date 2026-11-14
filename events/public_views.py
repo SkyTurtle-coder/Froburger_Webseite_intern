@@ -19,6 +19,7 @@ from accounts.models import CalendarSubscription
 from . import signing
 from .calendar_service import CalendarFeedService, CalendarResponseBuilder
 from .models import Event, EventSignup, EventSignupColumn
+from .member_signup import DENIED_MESSAGE, attempt_allowed, is_internal, resolve_member
 
 
 SIGNUP_RATE_LIMIT_SECONDS = 15
@@ -88,7 +89,7 @@ def _detail_payload(event):
     public_columns = [column for column in active_columns if column.is_public]
 
     signups = []
-    for signup in event.signups.public_visible().order_by("created_at", "pk"):
+    for signup in ([] if is_internal(event) else event.signups.public_visible().order_by("created_at", "pk")):
         values = {}
         for column in public_columns:
             values[column.key] = _serialize_public_value(column, signup.values.get(column.key))
@@ -110,6 +111,7 @@ def _detail_payload(event):
             "location": event.location,
             "image_url": None,
             "signup_enabled": event.signup_enabled,
+            "signup_policy": "members_v1",
             "signup_open": event.signup_enabled and not event.is_signup_closed,
             "signup_deadline": timezone.localtime(event.signup_deadline).isoformat(),
             "signup_columns": [_column_to_payload(column) for column in active_columns],
@@ -370,6 +372,7 @@ def v1_past_events_api(request):
 
 
 @require_safe
+@never_cache
 def v1_event_detail_api(request, slug):
     try:
         event = _public_queryset().prefetch_related("signup_columns", "signups").get(slug=slug)
@@ -408,28 +411,54 @@ def v1_event_signup_api(request, slug):
             payload = _parse_request_payload(request)
             if not isinstance(payload, dict):
                 return _error_response("invalid_payload", "Ungültige Anfrage.", 400)
+            # Only trusted, HMAC-authenticated callers can supply this opaque
+            # visitor key. Older callers share a restrictive proxy-IP fallback.
+            client_key = payload.pop("client_key", None)
+            member = None
+            if is_internal(event):
+                if not isinstance(client_key, str) or re.fullmatch(r"[a-f0-9]{64}", client_key) is None:
+                    client_key = "proxy:" + _client_ip(request)
+                if not attempt_allowed(client_key):
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                member = resolve_member(payload.get("vulgo"))
+                if member is None:
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
             operation = payload.get("operation", "create")
             if operation in ("read", "update"):
-                return _edit_signup(event, payload, operation)
+                response = _edit_signup(event, payload, operation, member=member)
+                if is_internal(event) and response.status_code >= 400:
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
+                return response
             if operation != "create":
+                if is_internal(event):
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
                 return _error_response("invalid_payload", "Ungültige Anfrage.", 400)
-            if _signup_throttled(event.pk, request):
+            if not is_internal(event) and _signup_throttled(event.pk, request):
                 return _error_response("rate_limited", "Bitte warte kurz, bevor du das Formular erneut absendest.", 429)
             cleaned, error = _normalize_signup_payload(event, payload)
             if error is not None:
+                if is_internal(event):
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
                 code, message, status = error
                 return _error_response(code, message, status)
 
             normalized_vulgo = EventSignup.normalize_vulgo(cleaned["vulgo"])
             if EventSignup.objects.filter(event=event, normalized_vulgo=normalized_vulgo).exists():
+                if is_internal(event):
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
                 return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
+            if member and EventSignup.objects.filter(event=event, member_profile=member).exists():
+                return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
 
             pin = payload.get("pin")
             if not isinstance(pin, str) or re.fullmatch(r"[0-9]{4,6}", pin) is None:
+                if is_internal(event):
+                    return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
                 return _error_response("invalid_pin", "Der PIN muss aus 4 bis 6 Ziffern bestehen.", 400)
 
             signup = EventSignup(
                 event=event,
+                member_profile=member,
                 vulgo=cleaned["vulgo"],
                 attending=cleaned["attending"],
                 values=cleaned["values"],
@@ -439,6 +468,8 @@ def v1_event_signup_api(request, slug):
     except Event.DoesNotExist:
         return _error_response("event_not_found", "Dieser Anlass wurde nicht gefunden.", 404)
     except IntegrityError:
+        if is_internal(event):
+            return _error_response("member_signup_denied", DENIED_MESSAGE, 403)
         return _error_response("duplicate_signup", "Fuer diesen Anlass besteht bereits eine Anmeldung mit diesem Vulgo.", 409)
 
     _mark_signup_attempt(event.pk, request)
@@ -457,7 +488,7 @@ def v1_event_signup_api(request, slug):
     )
 
 
-def _edit_signup(event, payload, operation):
+def _edit_signup(event, payload, operation, member=None):
     """Called inside the event transaction; never exposes PINs or hashes."""
     allowed = {"operation", "vulgo", "pin", "website"}
     if operation == "update":
@@ -470,6 +501,12 @@ def _edit_signup(event, payload, operation):
     signup = event.signups.select_for_update().filter(
         normalized_vulgo=EventSignup.normalize_vulgo(vulgo)
     ).first()
+    if member:
+        linked = event.signups.select_for_update().filter(member_profile=member).first()
+        if linked:
+            signup = linked
+        if signup and signup.member_profile_id not in (None, member.pk):
+            signup = None
     now = timezone.now()
     if signup and signup.pin_locked_until and signup.pin_locked_until > now:
         return _error_response("pin_locked", "Zu viele Fehlversuche. Bitte versuche es in 15 Minuten erneut oder kontaktiere den Admin.", 429)
@@ -485,6 +522,10 @@ def _edit_signup(event, payload, operation):
     EventSignup.objects.filter(pk=signup.pk).update(pin_failed_attempts=0, pin_locked_until=None)
     signup.pin_failed_attempts = 0
     signup.pin_locked_until = None
+    if member and signup.member_profile_id is None:
+        # Bind legacy registrations only after validating their existing PIN.
+        signup.member_profile = member
+        signup.save(source=EventSignup.SOURCE_API)
     if operation == "update":
         cleaned, error = _normalize_signup_payload(event, payload)
         if error:

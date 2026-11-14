@@ -114,7 +114,7 @@ class EventInternalFlagTests(TestCase):
         self.assertEqual(self.event.calendar_sequence, sequence + 1)
 
     @override_settings(PUBLIC_EVENT_SIGNUP_SHARED_SECRET="internal-flag-test")
-    def test_public_signup_is_not_restricted_by_this_preparatory_change(self):
+    def test_internal_public_signup_requires_a_member(self):
         self.event.is_internal = True
         self.event.save()
         detail = self.client.get(reverse("api-v1-event-detail", args=[self.event.slug]))
@@ -128,7 +128,8 @@ class EventInternalFlagTests(TestCase):
             content_type="application/json", HTTP_X_AVF_TIMESTAMP=timestamp,
             HTTP_X_AVF_SIGNATURE=signature,
         )
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["message"], "Sorry, nur für Froburger.")
 
     def test_manager_create_edit_and_filter_combination(self):
         self.client.force_login(self.manager)

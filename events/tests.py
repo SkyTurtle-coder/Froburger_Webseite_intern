@@ -345,9 +345,7 @@ class EventPublicApiTests(TestCase):
         self.assertEqual(payload["signup_columns"][0]["key"], self.public_column.key)
         self.assertTrue(payload["signup_columns"][0]["public"])
         self.assertFalse(payload["signup_columns"][1]["public"])
-        self.assertEqual(payload["signups"][0]["values"], {self.public_column.key: "Vegetarisch"})
-        self.assertEqual(len(payload["signups"]), 1)
-        self.assertIn("created_at", payload["signups"][0])
+        self.assertEqual(payload["signups"], [])
 
     def test_v1_detail_api_hides_non_wordpress_event(self):
         response = self.client.get(reverse("api-v1-event-detail", kwargs={"slug": "versteckter-interner-anlass"}))

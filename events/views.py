@@ -6,6 +6,8 @@ from django.db.models import Q
 from django.http import HttpResponseRedirect
 from django.shortcuts import redirect
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import never_cache
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
@@ -13,6 +15,7 @@ from core.permissions import RoleAccessMixin
 
 from .forms import EventForm, EventSignupColumnFormSet, EventSignupManageForm, EventSignupPublicForm
 from .models import Event, EventSignup
+from .member_signup import DENIED_MESSAGE, is_internal
 
 
 class EventListView(RoleAccessMixin, ListView):
@@ -229,6 +232,7 @@ class EventDeleteView(RoleAccessMixin, DeleteView):
         return super().form_valid(form)
 
 
+@method_decorator(never_cache, name="dispatch")
 class PublicEventDetailView(DetailView):
     model = Event
     template_name = "events/public_event_detail.html"
@@ -239,9 +243,16 @@ class PublicEventDetailView(DetailView):
     def get_queryset(self):
         return Event.objects.filter(is_public=True, is_cancelled=False).prefetch_related("signup_columns", "signups").order_by("start", "title")
 
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
         self.object = self.get_object()
+        self.object = self.get_queryset().select_for_update().get(pk=self.object.pk)
         form = EventSignupPublicForm(request.POST, event=self.object)
+        if is_internal(self.object):
+            # Internal registrations use the signed WordPress endpoint only.
+            form.is_valid()
+            form.add_error(None, DENIED_MESSAGE)
+            return self.render_to_response(self.get_context_data(signup_form=form), status=403)
         if form.is_valid():
             normalized_vulgo = EventSignup.normalize_vulgo(form.cleaned_data["vulgo"])
             if EventSignup.objects.filter(event=self.object, normalized_vulgo=normalized_vulgo).exists():
@@ -273,7 +284,7 @@ class PublicEventDetailView(DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        signups = list(self.object.signups.public_visible().order_by("created_at", "pk"))
+        signups = [] if is_internal(self.object) else list(self.object.signups.public_visible().order_by("created_at", "pk"))
         signup_columns = [column for column in self.object.active_signup_columns() if column.is_public]
         signup_rows = [
             {

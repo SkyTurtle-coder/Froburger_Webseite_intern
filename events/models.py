@@ -262,12 +262,22 @@ class EventSignupAllObjectsManager(models.Manager):
         return self.get_queryset().deleted()
 
 
+class SignupAttemptWindow(models.Model):
+    key = models.CharField(max_length=64, primary_key=True)
+    attempts = models.PositiveIntegerField(default=0)
+    expires_at = models.DateTimeField(db_index=True)
+
+
 class EventSignup(models.Model):
     SOURCE_PUBLIC_FORM = "public_form"
     SOURCE_INTERNAL = "internal"
     SOURCE_API = "api"
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="signups")
+    member_profile = models.ForeignKey(
+        "accounts.Profile", null=True, blank=True, editable=False,
+        on_delete=models.PROTECT, related_name="event_signups",
+    )
     vulgo = models.CharField(max_length=80)
     normalized_vulgo = models.CharField(max_length=80, editable=False)
     attending = models.BooleanField()
