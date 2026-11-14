@@ -35,3 +35,18 @@ inserts; do not blindly roll back or drop internal flags entered since launch.
 Validation: `python manage.py test events --noinput`; focused coverage lives
 in events/tests_internal_flag.py and includes all four combinations, legacy
 data, API and homepage rules, create/edit permissions and unchanged signup.
+
+## Prepared production command
+
+Run in local PowerShell from app/intern:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\Deploy-EventInternal.ps1 -Deploy
+```
+
+Without -Deploy, only prepares the package. Uses the Debian SSH target and
+service environment. Backs up code and MariaDB, checks the exact migration
+plan and applies only events.0011. Unrelated server changes stop deployment.
+If migration fails partway, the service stays stopped for schema inspection;
+no automatic database restore or removal of new data is attempted. After a
+successful migration, recovery keeps the new code compatible with the schema.
